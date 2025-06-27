@@ -205,7 +205,21 @@
 
 # 바이너리 버전 확인
 - name: "설치된 바이너리 버전 확인"
-  shell: "{{ k8s_bin_dir }}/{{ item }} --version"
+  shell: |
+    case "{{ item }}" in
+      "kubeadm")
+        {{ k8s_bin_dir }}/{{ item }} version --output short
+        ;;
+      "kubectl")
+        {{ k8s_bin_dir }}/{{ item }} version --client --short
+        ;;
+      "kubelet")
+        {{ k8s_bin_dir }}/{{ item }} --version
+        ;;
+      *)
+        {{ k8s_bin_dir }}/{{ item }} --version
+        ;;
+    esac
   register: binary_versions_check
   loop:
     - kubectl
