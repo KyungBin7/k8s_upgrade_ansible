@@ -1,21 +1,28 @@
 # Kubernetes 클러스터 인벤토리
 # 환경에 맞게 IP 주소와 사용자명을 수정하세요
 
-[k8s_masters]
-# 컨트롤 플레인 노드들 (마스터)
-master1 ansible_host=10.40.151.121 ansible_user=root
-master2 ansible_host=10.40.151.122 ansible_user=root
-master3 ansible_host=10.40.151.123 ansible_user=root
+[all:vars]
+ansible_user=root
+ansible_ssh_private_key_file=~/.ssh/id_rsa
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+ansible_python_interpreter=/usr/libexec/platform-python
 
-[k8s_workers]
-# 워커 노드들
-worker1 ansible_host=10.40.151.131 ansible_user=root
-worker2 ansible_host=10.40.151.132 ansible_user=root
+[control_plane]
+master1 ansible_host=10.40.151.121
+master2 ansible_host=10.40.151.122
+master3 ansible_host=10.40.151.123
 
+[workers] 
+worker1 ansible_host=10.40.151.131
+worker2 ansible_host=10.40.151.132
 
-[k8s_cluster:children]
-k8s_masters
-k8s_workers
+# 별칭 그룹 정의
+[masters:children]
+control_plane
+
+[nodes:children]
+control_plane
+workers
 
 [k8s_cluster:vars]
 # 공통 연결 설정
