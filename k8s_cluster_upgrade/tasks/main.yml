@@ -54,30 +54,33 @@
   tags:
     - backup
 
-# 8. 컨트롤 플레인 업그레이드 (마스터 노드인 경우)
-- name: "컨트롤 플레인 업그레이드"
+# 8. 마스터 노드 업그레이드 (control_plane 단계에서만)
+- name: "첫 번째 컨트롤 플레인 업그레이드"
   include_tasks: upgrade_control_plane.yml
   when: 
+    - k8s_upgrade_phase | default('') == 'control_plane'
     - k8s_detected_role == 'master'
-    - inventory_hostname == groups['k8s_masters'][0] | default(groups['all'][0])
+    - inventory_hostname == groups['control_plane'][0] | default(groups['all'][0])
   tags:
     - control-plane
     - master
 
-# 9. 다른 컨트롤 플레인 노드 업그레이드
 - name: "추가 컨트롤 플레인 노드 업그레이드"
   include_tasks: upgrade_other_masters.yml
   when: 
+    - k8s_upgrade_phase | default('') == 'control_plane'
     - k8s_detected_role == 'master'
-    - inventory_hostname != groups['k8s_masters'][0] | default(groups['all'][0])
+    - inventory_hostname != groups['control_plane'][0] | default(groups['all'][0])
   tags:
     - control-plane
     - other-masters
 
-# 10. 워커 노드 업그레이드
+# 9. 워커 노드 업그레이드 (worker 단계에서만)
 - name: "워커 노드 업그레이드"
   include_tasks: upgrade_worker.yml
-  when: k8s_detected_role == 'worker'
+  when: 
+    - k8s_upgrade_phase | default('') == 'worker'
+    - k8s_detected_role == 'worker'
   tags:
     - worker
 

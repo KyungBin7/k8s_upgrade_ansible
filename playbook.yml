@@ -2,17 +2,19 @@
 # Kubernetes 클러스터 업그레이드 플레이북
 # 사용법: ansible-playbook -i inventory/hosts playbook.yml
 
-- name: "Kubernetes 클러스터 업그레이드"
-  hosts: k8s_cluster
+# 1단계: 마스터 노드 업그레이드 (순차적)
+- name: "🏗️  Kubernetes 마스터 노드 업그레이드"
+  hosts: control_plane
   become: yes
   gather_facts: yes
-  serial: "{{ k8s_upgrade_strategy == 'all-at-once' | ternary('100%', 1) }}"
+  serial: 1  # 마스터 노드는 항상 하나씩 순차적으로
   
   vars:
     # 기본 설정 - 자동 버전 업그레이드
     k8s_current_version: ""  # 자동 감지
     k8s_target_version: ""   # 다음 마이너 버전으로 자동 설정
     k8s_force_version: false
+    k8s_upgrade_phase: "control_plane"
     
     # 업그레이드 전략
     k8s_upgrade_strategy: "rolling"  # rolling 또는 all-at-once
@@ -39,11 +41,11 @@
     k8s_container_runtime: "crio"
 
   pre_tasks:
-    - name: "업그레이드 시작 알림"
+    - name: "마스터 노드 업그레이드 시작 알림"
       debug:
         msg: |
           ==========================================
-          🚀 Kubernetes 클러스터 업그레이드 시작
+          🏗️  Kubernetes 마스터 노드 업그레이드 시작
           ==========================================
           📍 타겟 호스트: {{ inventory_hostname }}
           🕐 시작 시간: {{ ansible_date_time.iso8601 }}
@@ -51,41 +53,180 @@
           💾 메모리: {{ ansible_memtotal_mb }}MB
           💿 디스크: {{ ansible_mounts[0].size_available }}
           🔗 IP: {{ ansible_default_ipv4.address }}
+          ⚠️  순서: 마스터 노드들을 하나씩 순차적으로 업그레이드
           ==========================================
       tags: always
 
-    - name: "업그레이드 사전 알림"
+    - name: "마스터 노드 업그레이드 사전 알림"
       pause:
         prompt: |
-          ⚠️  중요: Kubernetes 클러스터 업그레이드를 시작합니다.
+          ⚠️  중요: Kubernetes 마스터 노드 업그레이드를 시작합니다.
           
           📋 체크리스트:
           ✅ 클러스터 백업이 준비되었나요?
-          ✅ 업그레이드 중 서비스 중단을 예상하고 있나요?
-          ✅ 문제 발생 시 롤백 계획이 있나요?
+          ✅ etcd 백업이 완료되었나요?
+          ✅ 마스터 노드 업그레이드 중 클러스터 접근이 제한됩니다.
           
           계속하려면 Enter를 누르세요 (Ctrl+C로 취소)
       when: 
         - k8s_interactive_mode | default(false)
         - not ansible_check_mode
+        - inventory_hostname == groups['control_plane'][0]  # 첫 번째 마스터에서만
       tags: always
 
   roles:
     - k8s_cluster_upgrade
 
   post_tasks:
-    - name: "업그레이드 완료 알림"
+    - name: "마스터 노드 업그레이드 완료 알림"
       debug:
         msg: |
           ==========================================
-          🎉 Kubernetes 클러스터 업그레이드 완료!
+          ✅ 마스터 노드 업그레이드 완료!
           ==========================================
           📍 호스트: {{ inventory_hostname }}
           🕐 완료 시간: {{ ansible_date_time.iso8601 }}
           📊 이전 버전: {{ k8s_current_version | default('감지 실패') }}
           📊 현재 버전: {{ k8s_target_version | default('업그레이드 실패') }}
           💾 백업 위치: {{ k8s_current_backup_dir | default('백업 없음') }}
+          ⏭️  다음: 워커 노드 업그레이드 대기 중...
           ==========================================
+      tags: always
+
+  handlers:
+    - name: restart kubelet
+      systemd:
+        name: kubelet
+        state: restarted
+        enabled: yes
+      
+    - name: restart crio
+      systemd:
+        name: crio
+        state: restarted
+        enabled: yes
+
+# 2단계: 워커 노드 업그레이드 (순차적, 마스터 완료 후)
+- name: "🚀 Kubernetes 워커 노드 업그레이드"
+  hosts: workers
+  become: yes
+  gather_facts: yes
+  serial: 1  # 워커 노드는 하나씩 순차적으로 (서비스 다운타임 방지)
+  
+  vars:
+    # 기본 설정 - 마스터와 동일한 버전으로
+    k8s_current_version: ""  # 자동 감지
+    k8s_target_version: ""   # 마스터와 동일한 버전으로 설정
+    k8s_force_version: false
+    k8s_upgrade_phase: "worker"
+    
+    # 업그레이드 전략 - 워커는 더 신중하게
+    k8s_upgrade_strategy: "rolling"
+    k8s_upgrade_timeout: 600  # 10분 (워커는 마스터보다 빠름)
+    k8s_upgrade_drain_timeout: 300  # 5분
+    k8s_upgrade_skip_drain: false  # 워커는 반드시 drain 수행
+    k8s_upgrade_skip_cordon: false
+    
+    # 백업 설정 (워커는 간소화)
+    k8s_backup_enabled: false  # 워커는 상태가 없으므로 백업 불필요
+    k8s_backup_dir: "/opt/k8s-backup"
+    k8s_backup_retention_days: 7
+    
+    # 검증 설정
+    k8s_verify_upgrade: true
+    k8s_health_check_retries: 20
+    k8s_health_check_delay: 15  # 워커는 더 자주 체크
+    
+    # 로그 설정
+    k8s_log_level: "info"
+    k8s_log_file: "/var/log/k8s-upgrade.log"
+    
+    # CRI-O 런타임 설정
+    k8s_container_runtime: "crio"
+
+  pre_tasks:
+    - name: "워커 노드 업그레이드 시작 알림"
+      debug:
+        msg: |
+          ==========================================
+          🚀 Kubernetes 워커 노드 업그레이드 시작
+          ==========================================
+          📍 타겟 호스트: {{ inventory_hostname }}
+          🕐 시작 시간: {{ ansible_date_time.iso8601 }}
+          🔧 OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          💾 메모리: {{ ansible_memtotal_mb }}MB
+          💿 디스크: {{ ansible_mounts[0].size_available }}
+          🔗 IP: {{ ansible_default_ipv4.address }}
+          ⚠️  순서: 워커 노드들을 하나씩 순차적으로 업그레이드
+          🛡️  보장: 이전 워커 업그레이드 완료 후 다음 진행
+          ==========================================
+      tags: always
+
+    - name: "워커 노드 업그레이드 사전 알림"
+      pause:
+        prompt: |
+          ⚠️  중요: Kubernetes 워커 노드 업그레이드를 시작합니다.
+          
+          📋 체크리스트:
+          ✅ 마스터 노드 업그레이드가 완료되었나요?
+          ✅ 워커 노드가 순차적으로 하나씩 업그레이드됩니다.
+          ✅ 파드가 다른 노드로 이전됩니다.
+          
+          계속하려면 Enter를 누르세요 (Ctrl+C로 취소)
+      when: 
+        - k8s_interactive_mode | default(false)
+        - not ansible_check_mode
+        - inventory_hostname == groups['workers'][0]  # 첫 번째 워커에서만
+      tags: always
+
+    - name: "마스터 노드 상태 확인"
+      uri:
+        url: "https://{{ groups['control_plane'][0] }}:6443/healthz"
+        method: GET
+        validate_certs: no
+        status_code: 200
+      delegate_to: "{{ groups['control_plane'][0] }}"
+      register: master_health_check
+      retries: 5
+      delay: 10
+      tags: always
+
+  roles:
+    - k8s_cluster_upgrade
+
+  post_tasks:
+    - name: "워커 노드 업그레이드 완료 알림"
+      debug:
+        msg: |
+          ==========================================
+          ✅ 워커 노드 업그레이드 완료!
+          ==========================================
+          📍 호스트: {{ inventory_hostname }}
+          🕐 완료 시간: {{ ansible_date_time.iso8601 }}
+          📊 이전 버전: {{ k8s_current_version | default('감지 실패') }}
+          📊 현재 버전: {{ k8s_target_version | default('업그레이드 실패') }}
+          🔄 다음: 다음 워커 노드 업그레이드 대기 중...
+          ==========================================
+      tags: always
+
+    - name: "최종 클러스터 상태 확인"
+      command: kubectl get nodes -o wide
+      register: final_cluster_status
+      delegate_to: "{{ groups['control_plane'][0] }}"
+      when: inventory_hostname == groups['workers'][-1]  # 마지막 워커에서만
+      tags: always
+
+    - name: "최종 클러스터 상태 표시"
+      debug:
+        msg: |
+          ==========================================
+          🎉 전체 클러스터 업그레이드 완료!
+          ==========================================
+          {{ final_cluster_status.stdout }}
+          ==========================================
+      when: 
+        - inventory_hostname == groups['workers'][-1]  # 마지막 워커에서만
+        - final_cluster_status is defined
       tags: always
 
     - name: "재부팅 필요 여부 알림"
