@@ -25,6 +25,14 @@
       delegate_to: localhost
       run_once: true
 
+    - name: "SSH 디렉터리 생성"
+      file:
+        path: "{{ ssh_key_path | dirname }}"
+        state: directory
+        mode: '0700'
+      delegate_to: localhost
+      run_once: true
+
     - name: "기존 SSH 키 확인"
       stat:
         path: "{{ ssh_key_path }}"
@@ -79,6 +87,14 @@
         delay: 1
         timeout: 10
       ignore_errors: true
+
+    - name: "타겟 서버 SSH 디렉터리 생성"
+      file:
+        path: "~{{ ansible_user }}/.ssh"
+        state: directory
+        mode: '0700'
+        owner: "{{ ansible_user }}"
+        group: "{{ ansible_user }}"
 
     - name: "SSH 공개키 배포"
       authorized_key:
