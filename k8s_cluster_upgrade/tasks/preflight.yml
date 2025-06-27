@@ -26,10 +26,14 @@
   register: available_disk_space
   changed_when: false
 
+- name: "디스크 공간 디버그 정보"
+  debug:
+    msg: "디스크 공간 확인 - 원본: '{{ available_disk_space.stdout }}', 정수변환: {{ available_disk_space.stdout | int }}, 조건: {{ (available_disk_space.stdout | int) < 10 }}"
+
 - name: "디스크 공간 검증"
   fail:
-    msg: "디스크 공간이 부족합니다. 최소 10GB 필요"
-  when: available_disk_space.stdout | int < 10
+    msg: "디스크 공간이 부족합니다. 최소 10GB 필요, 현재: {{ available_disk_space.stdout }}GB"
+  when: (available_disk_space.stdout | int) < 10
 
 - name: "필수 명령어 존재 확인"
   command: "which {{ item }}"
