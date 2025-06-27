@@ -26,35 +26,35 @@
     - target
     - always
 
-# 3.5. 공식 repo 버전 체크
-- name: "공식 repo 버전 체크"
-  include_tasks: check_official_repo.yml
-  tags:
-    - repo-check
-    - always
-
-# 4. 백업 수행
-- name: "백업 수행"
-  include_tasks: backup.yml
-  when: k8s_backup_enabled
-  tags:
-    - backup
-
-# 5. 노드 역할 감지
+# 4. 노드 역할 감지
 - name: "노드 역할 감지"
   include_tasks: detect_role.yml
   tags:
     - role
     - always
 
-# 6. 패키지 관리자 감지
+# 5. 패키지 관리자 감지
 - name: "패키지 관리자 감지"
   include_tasks: detect_package_manager.yml
   tags:
     - package
     - always
 
-# 7. 컨트롤 플레인 업그레이드 (마스터 노드인 경우)
+# 6. 공식 repo 버전 체크
+- name: "공식 repo 버전 체크"
+  include_tasks: check_official_repo.yml
+  tags:
+    - repo-check
+    - always
+
+# 7. 백업 수행
+- name: "백업 수행"
+  include_tasks: backup.yml
+  when: k8s_backup_enabled
+  tags:
+    - backup
+
+# 8. 컨트롤 플레인 업그레이드 (마스터 노드인 경우)
 - name: "컨트롤 플레인 업그레이드"
   include_tasks: upgrade_control_plane.yml
   when: 
@@ -64,7 +64,7 @@
     - control-plane
     - master
 
-# 8. 다른 컨트롤 플레인 노드 업그레이드
+# 9. 다른 컨트롤 플레인 노드 업그레이드
 - name: "추가 컨트롤 플레인 노드 업그레이드"
   include_tasks: upgrade_other_masters.yml
   when: 
@@ -74,14 +74,14 @@
     - control-plane
     - other-masters
 
-# 9. 워커 노드 업그레이드
+# 10. 워커 노드 업그레이드
 - name: "워커 노드 업그레이드"
   include_tasks: upgrade_worker.yml
   when: k8s_detected_role == 'worker'
   tags:
     - worker
 
-# 10. 업그레이드 후 검증
+# 11. 업그레이드 후 검증
 - name: "업그레이드 검증"
   include_tasks: verify.yml
   when: k8s_verify_upgrade
@@ -89,7 +89,7 @@
     - verify
     - always
 
-# 11. 정리 작업
+# 12. 정리 작업
 - name: "정리 작업"
   include_tasks: cleanup.yml
   tags:
