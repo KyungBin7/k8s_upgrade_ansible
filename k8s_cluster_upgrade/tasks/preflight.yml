@@ -25,15 +25,20 @@
   shell: df -h / | tail -1 | awk '{print $4}' | sed 's/G//'
   register: available_disk_space
   changed_when: false
+  when: not ansible_check_mode
 
-- name: "디스크 공간 디버그 정보"
+- name: "디스크 공간 검증 (check 모드에서는 건너뜀)"
   debug:
-    msg: "디스크 공간 확인 - 원본: '{{ available_disk_space.stdout }}', 정수변환: {{ available_disk_space.stdout | int }}, 조건: {{ (available_disk_space.stdout | int) < 10 }}"
+    msg: "Check 모드에서는 디스크 공간 검증을 건너뜁니다."
+  when: ansible_check_mode
 
 - name: "디스크 공간 검증"
   fail:
     msg: "디스크 공간이 부족합니다. 최소 10GB 필요, 현재: {{ available_disk_space.stdout }}GB"
-  when: (available_disk_space.stdout | int) < 10
+  when: 
+    - not ansible_check_mode
+    - available_disk_space.stdout is defined
+    - (available_disk_space.stdout | int) < 10
 
 - name: "필수 명령어 존재 확인"
   command: "which {{ item }}"
