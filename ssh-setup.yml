@@ -1,0 +1,131 @@
+---
+# SSH 키 생성 및 배포 플레이북
+# 사용법: ansible-playbook ssh-setup.yml -k
+
+- name: "SSH 키 생성 및 배포"
+  hosts: k8s_cluster
+  gather_facts: false
+  
+  vars:
+    ssh_key_path: "~/.ssh/id_rsa"
+    ssh_key_comment: "ansible-k8s-cluster"
+    ssh_key_bits: 3072
+    
+  tasks:
+    - name: "SSH 키 생성 시작 알림"
+      debug:
+        msg: |
+          ==========================================
+          🔑 SSH 키 생성 및 배포 시작
+          ==========================================
+          🎯 대상 호스트: {{ inventory_hostname }}
+          👤 사용자: {{ ansible_user }}
+          🔑 키 경로: {{ ssh_key_path }}
+          ==========================================
+      delegate_to: localhost
+      run_once: true
+
+    - name: "기존 SSH 키 확인"
+      stat:
+        path: "{{ ssh_key_path }}"
+      register: ssh_key_exists
+      delegate_to: localhost
+      run_once: true
+
+    - name: "기존 SSH 키 백업"
+      copy:
+        src: "{{ ssh_key_path }}"
+        dest: "{{ ssh_key_path }}.backup.{{ ansible_date_time.epoch }}"
+      when: ssh_key_exists.stat.exists
+      delegate_to: localhost
+      run_once: true
+
+    - name: "기존 SSH 공개키 백업"
+      copy:
+        src: "{{ ssh_key_path }}.pub"
+        dest: "{{ ssh_key_path }}.pub.backup.{{ ansible_date_time.epoch }}"
+      when: ssh_key_exists.stat.exists
+      delegate_to: localhost
+      run_once: true
+      ignore_errors: true
+
+    - name: "새 SSH 키 생성"
+      openssh_keypair:
+        path: "{{ ssh_key_path }}"
+        type: rsa
+        size: "{{ ssh_key_bits }}"
+        comment: "{{ ssh_key_comment }}"
+        force: true
+      delegate_to: localhost
+      run_once: true
+
+    - name: "생성된 SSH 공개키 읽기"
+      slurp:
+        src: "{{ ssh_key_path }}.pub"
+      register: ssh_public_key
+      delegate_to: localhost
+      run_once: true
+
+    - name: "SSH 공개키 내용 표시"
+      debug:
+        msg: |
+          생성된 SSH 공개키:
+          {{ ssh_public_key.content | b64decode }}
+      delegate_to: localhost
+      run_once: true
+
+    - name: "타겟 서버 연결 테스트"
+      wait_for_connection:
+        delay: 1
+        timeout: 10
+      ignore_errors: true
+
+    - name: "SSH 공개키 배포"
+      authorized_key:
+        user: "{{ ansible_user }}"
+        state: present
+        key: "{{ ssh_public_key.content | b64decode }}"
+        comment: "{{ ssh_key_comment }}"
+        exclusive: false
+      register: key_deploy_result
+
+    - name: "SSH 키 배포 결과"
+      debug:
+        msg: |
+          📍 호스트: {{ inventory_hostname }}
+          👤 사용자: {{ ansible_user }}
+          ✅ 상태: {{ '성공' if key_deploy_result.changed else '이미 존재' }}
+
+- name: "SSH 키 배포 완료 및 테스트"
+  hosts: k8s_cluster
+  gather_facts: false
+  
+  tasks:
+    - name: "SSH 키 기반 연결 테스트"
+      ping:
+      register: ssh_test_result
+
+    - name: "SSH 연결 테스트 결과"
+      debug:
+        msg: |
+          ==========================================
+          🎉 SSH 키 배포 완료!
+          ==========================================
+          📍 호스트: {{ inventory_hostname }}
+          🔗 연결 상태: {{ '성공' if ssh_test_result.ping == 'pong' else '실패' }}
+          ==========================================
+
+    - name: "전체 완료 알림"
+      debug:
+        msg: |
+          ==========================================
+          ✅ 모든 노드에 SSH 키 배포 완료!
+          ==========================================
+          
+          이제 패스워드 없이 연결할 수 있습니다:
+          ansible all -m ping
+          
+          Kubernetes 업그레이드를 진행하세요:
+          ansible-playbook playbook.yml
+          ==========================================
+      run_once: true 
