@@ -1,0 +1,174 @@
+---
+# 백업 태스크
+
+- name: "백업 시작"
+  debug:
+    msg: "Kubernetes 클러스터 백업을 시작합니다."
+
+- name: "백업 디렉토리 생성"
+  file:
+    path: "{{ k8s_backup_dir }}/{{ ansible_date_time.epoch }}"
+    state: directory
+    mode: '0755'
+  register: backup_timestamp_dir
+
+- name: "백업 디렉토리 경로 저장"
+  set_fact:
+    k8s_current_backup_dir: "{{ backup_timestamp_dir.path }}"
+
+# etcd 백업 (마스터 노드인 경우)
+- name: "etcd 백업 실행"
+  shell: |
+    ETCDCTL_API=3 etcdctl snapshot save {{ k8s_current_backup_dir }}/etcd-snapshot.db \
+      --endpoints=https://127.0.0.1:2379 \
+      --cacert={{ k8s_config_dir }}/pki/etcd/ca.crt \
+      --cert={{ k8s_config_dir }}/pki/etcd/server.crt \
+      --key={{ k8s_config_dir }}/pki/etcd/server.key
+  register: etcd_backup_result
+  failed_when: false
+  when: 
+    - k8s_detected_role == "master"
+    - k8s_is_first_master | default(false)
+
+- name: "etcd 백업 상태 확인"
+  debug:
+    msg: "etcd 백업 {{ '성공' if etcd_backup_result.rc == 0 else '실패' }}"
+  when: 
+    - k8s_detected_role == "master"
+    - k8s_is_first_master | default(false)
+
+# 설정 파일 백업
+- name: "Kubernetes 설정 파일 백업"
+  synchronize:
+    src: "{{ item }}"
+    dest: "{{ k8s_current_backup_dir }}/"
+    delete: false
+    recursive: true
+  delegate_to: "{{ inventory_hostname }}"
+  loop: "{{ k8s_backup_files }}"
+  when: 
+    - item | basename != "etcd" or k8s_detected_role == "master"
+  ignore_errors: true
+
+# 바이너리 파일 백업
+- name: "현재 Kubernetes 바이너리 백업"
+  copy:
+    src: "{{ k8s_bin_dir }}/{{ item }}"
+    dest: "{{ k8s_current_backup_dir }}/binaries/"
+    remote_src: true
+    mode: '0755'
+  loop:
+    - kubectl
+    - kubelet
+    - kubeadm
+  ignore_errors: true
+
+# 시스템 서비스 파일 백업
+- name: "systemd 서비스 파일 백업"
+  copy:
+    src: "{{ item }}"
+    dest: "{{ k8s_current_backup_dir }}/systemd/"
+    remote_src: true
+  loop:
+    - /etc/systemd/system/kubelet.service
+    - /etc/systemd/system/kubelet.service.d/10-kubeadm.conf
+  ignore_errors: true
+
+# 현재 클러스터 상태 백업
+- name: "클러스터 상태 정보 백업"
+  shell: "{{ item.command }}"
+  register: cluster_info
+  failed_when: false
+  loop:
+    - { command: "kubectl get nodes -o yaml", file: "nodes.yaml" }
+    - { command: "kubectl get pods --all-namespaces -o yaml", file: "pods.yaml" }
+    - { command: "kubectl get services --all-namespaces -o yaml", file: "services.yaml" }
+    - { command: "kubectl get deployments --all-namespaces -o yaml", file: "deployments.yaml" }
+    - { command: "kubectl get configmaps --all-namespaces -o yaml", file: "configmaps.yaml" }
+    - { command: "kubectl get secrets --all-namespaces -o yaml", file: "secrets.yaml" }
+    - { command: "kubectl version", file: "version.txt" }
+  when: k8s_detected_role == "master"
+
+- name: "클러스터 상태 파일 저장"
+  copy:
+    content: "{{ item.stdout }}"
+    dest: "{{ k8s_current_backup_dir }}/cluster-state/{{ item.item.file }}"
+  loop: "{{ cluster_info.results }}"
+  when: 
+    - k8s_detected_role == "master"
+    - item.rc == 0
+  loop_control:
+    label: "{{ item.item.file }}"
+
+# 패키지 정보 백업
+- name: "설치된 패키지 정보 백업 (yum)"
+  shell: "yum list installed | grep -E 'kube|cri-o'"
+  register: yum_packages
+  failed_when: false
+  when: ansible_os_family == "RedHat"
+
+- name: "설치된 패키지 정보 백업 (apt)"
+  shell: "dpkg -l | grep -E 'kube|cri-o'"
+  register: apt_packages
+  failed_when: false
+  when: ansible_os_family == "Debian"
+
+- name: "패키지 정보 파일 저장 (yum)"
+  copy:
+    content: "{{ yum_packages.stdout }}"
+    dest: "{{ k8s_current_backup_dir }}/package-info.txt"
+  when: 
+    - ansible_os_family == "RedHat"
+    - yum_packages.rc == 0
+
+- name: "패키지 정보 파일 저장 (apt)"
+  copy:
+    content: "{{ apt_packages.stdout }}"
+    dest: "{{ k8s_current_backup_dir }}/package-info.txt"
+  when: 
+    - ansible_os_family == "Debian"
+    - apt_packages.rc == 0
+
+# 백업 메타데이터 생성
+- name: "백업 메타데이터 생성"
+  copy:
+    content: |
+      # Kubernetes 클러스터 백업 정보
+      백업 생성 시간: {{ ansible_date_time.iso8601 }}
+      호스트명: {{ inventory_hostname }}
+      노드 역할: {{ k8s_detected_role }}
+      현재 K8s 버전: {{ k8s_current_version }}
+      목표 K8s 버전: {{ k8s_target_version }}
+      OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+      패키지 관리자: {{ k8s_detected_package_manager }}
+      컨테이너 런타임: {{ k8s_active_runtime | default('N/A') }}
+      백업 디렉토리: {{ k8s_current_backup_dir }}
+    dest: "{{ k8s_current_backup_dir }}/backup-info.txt"
+
+# 이전 백업 정리
+- name: "오래된 백업 찾기"
+  find:
+    paths: "{{ k8s_backup_dir }}"
+    age: "{{ k8s_backup_retention_days }}d"
+    file_type: directory
+  register: old_backups
+  
+- name: "오래된 백업 삭제"
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ old_backups.files }}"
+  when: old_backups.files | length > 0
+
+- name: "백업 완료"
+  debug:
+    msg: 
+      - "백업이 완료되었습니다."
+      - "백업 위치: {{ k8s_current_backup_dir }}"
+      - "백업된 항목:"
+      - "  - etcd 스냅샷 (마스터 노드)"
+      - "  - Kubernetes 설정 파일"
+      - "  - 바이너리 파일"
+      - "  - 시스템 서비스 파일"
+      - "  - 클러스터 상태 정보"
+      - "  - 패키지 정보" 

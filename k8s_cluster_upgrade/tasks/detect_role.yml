@@ -1,0 +1,151 @@
+---
+# Kubernetes 노드 역할 감지
+
+- name: "수동 역할 설정 확인"
+  debug:
+    msg: "수동으로 설정된 노드 역할: {{ k8s_node_role }}"
+  when: k8s_node_role != "auto"
+
+- name: "마스터 노드 지시자 파일 확인"
+  stat:
+    path: "{{ item }}"
+  register: master_file_stats
+  loop: "{{ k8s_master_indicators }}"
+  when: k8s_node_role == "auto"
+
+- name: "마스터 노드 감지 (파일 기반)"
+  set_fact:
+    k8s_detected_role: "master"
+  when:
+    - k8s_node_role == "auto"
+    - master_file_stats.results | selectattr('stat.exists', 'equalto', true) | list | length > 0
+
+# kubectl을 통한 노드 역할 확인
+- name: "kubectl을 통한 노드 정보 확인"
+  command: kubectl get nodes {{ inventory_hostname }} -o jsonpath='{.metadata.labels}'
+  register: node_labels
+  failed_when: false
+  changed_when: false
+  when: 
+    - k8s_node_role == "auto"
+    - k8s_detected_role is not defined
+
+- name: "노드 라벨을 통한 역할 감지"
+  set_fact:
+    k8s_detected_role: "master"
+  when:
+    - k8s_node_role == "auto" 
+    - k8s_detected_role is not defined
+    - node_labels.rc == 0
+    - '"node-role.kubernetes.io/control-plane" in node_labels.stdout or "node-role.kubernetes.io/master" in node_labels.stdout'
+
+# 프로세스 기반 역할 감지
+- name: "Kubernetes 마스터 프로세스 확인"
+  command: pgrep -f "{{ item }}"
+  register: master_processes
+  failed_when: false
+  changed_when: false
+  loop:
+    - kube-apiserver
+    - kube-controller-manager
+    - kube-scheduler
+    - etcd
+  when:
+    - k8s_node_role == "auto"
+    - k8s_detected_role is not defined
+
+- name: "프로세스 기반 마스터 노드 감지"
+  set_fact:
+    k8s_detected_role: "master"
+  when:
+    - k8s_node_role == "auto"
+    - k8s_detected_role is not defined
+    - master_processes.results | selectattr('rc', 'equalto', 0) | list | length > 0
+
+# 워커 노드로 기본 설정
+- name: "워커 노드로 기본 설정"
+  set_fact:
+    k8s_detected_role: "worker"
+  when:
+    - k8s_node_role == "auto"
+    - k8s_detected_role is not defined
+
+# 수동 설정된 역할 사용
+- name: "수동 설정된 역할 사용"
+  set_fact:
+    k8s_detected_role: "{{ k8s_node_role }}"
+  when: k8s_node_role != "auto"
+
+# 역할별 추가 검증
+- name: "마스터 노드 구성 요소 확인"
+  stat:
+    path: "{{ item }}"
+  register: master_components
+  loop:
+    - "{{ k8s_config_dir }}/admin.conf"
+    - "{{ k8s_config_dir }}/controller-manager.conf"
+    - "{{ k8s_config_dir }}/scheduler.conf"
+    - "{{ k8s_config_dir }}/manifests"
+  when: k8s_detected_role == "master"
+
+- name: "마스터 노드 구성 요소 부족 경고"
+  debug:
+    msg: "경고: 일부 마스터 노드 구성 요소가 누락되었습니다."
+  when:
+    - k8s_detected_role == "master"
+    - master_components.results | selectattr('stat.exists', 'equalto', false) | list | length > 0
+
+# 인벤토리 그룹 확인
+- name: "인벤토리 그룹 기반 역할 검증"
+  debug:
+    msg: "인벤토리 그룹: {{ group_names }}"
+
+- name: "마스터 그룹 멤버십 확인"
+  set_fact:
+    k8s_in_master_group: true
+  when: 
+    - "'k8s_masters' in group_names or 'masters' in group_names or 'control_plane' in group_names"
+
+- name: "워커 그룹 멤버십 확인"
+  set_fact:
+    k8s_in_worker_group: true
+  when: 
+    - "'k8s_workers' in group_names or 'workers' in group_names or 'nodes' in group_names"
+
+# 역할 불일치 경고
+- name: "역할 불일치 경고 (마스터)"
+  debug:
+    msg: "경고: 감지된 역할({{ k8s_detected_role }})과 인벤토리 그룹이 일치하지 않을 수 있습니다."
+  when:
+    - k8s_detected_role == "master"
+    - k8s_in_worker_group is defined
+    - k8s_in_master_group is not defined
+
+- name: "역할 불일치 경고 (워커)"
+  debug:
+    msg: "경고: 감지된 역할({{ k8s_detected_role }})과 인벤토리 그룹이 일치하지 않을 수 있습니다."
+  when:
+    - k8s_detected_role == "worker"
+    - k8s_in_master_group is defined
+    - k8s_in_worker_group is not defined
+
+- name: "감지된 노드 역할 표시"
+  debug:
+    msg:
+      - "=== 노드 역할 정보 ==="
+      - "노드명: {{ inventory_hostname }}"
+      - "감지된 역할: {{ k8s_detected_role }}"
+      - "설정된 역할: {{ k8s_node_role }}"
+      - "인벤토리 그룹: {{ group_names | join(', ') }}"
+
+- name: "첫 번째 마스터 노드 확인"
+  set_fact:
+    k8s_is_first_master: true
+  when:
+    - k8s_detected_role == "master"
+    - inventory_hostname == groups['k8s_masters'][0] | default(groups['all'][0])
+
+- name: "첫 번째 마스터 노드 정보"
+  debug:
+    msg: "이 노드는 첫 번째 마스터 노드입니다."
+  when: k8s_is_first_master is defined and k8s_is_first_master 

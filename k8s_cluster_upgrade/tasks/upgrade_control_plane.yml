@@ -1,0 +1,175 @@
+---
+# 첫 번째 컨트롤 플레인 노드 업그레이드
+
+- name: "컨트롤 플레인 업그레이드 시작"
+  debug:
+    msg: "첫 번째 컨트롤 플레인 노드 업그레이드를 시작합니다."
+
+- name: "업그레이드 스킵 확인"
+  debug:
+    msg: "버전이 동일하여 업그레이드를 건너뜁니다."
+  when: k8s_skip_upgrade
+
+# kubeadm 업그레이드
+- name: "kubeadm 업그레이드 (패키지 방식)"
+  include_tasks: install_packages.yml
+  vars:
+    k8s_packages_to_install:
+      - "kubeadm={{ k8s_target_version | regex_replace('^v', '') }}-*"
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_detected_package_manager in ['yum', 'apt']
+
+- name: "kubeadm 업그레이드 (바이너리 방식)"
+  include_tasks: install_binaries.yml
+  vars:
+    k8s_binaries_to_install:
+      - kubeadm
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_detected_package_manager == 'binary'
+
+# kubeadm 업그레이드 계획 확인
+- name: "kubeadm 업그레이드 계획 확인"
+  command: kubeadm upgrade plan
+  register: upgrade_plan_output
+  when: not k8s_skip_upgrade
+
+- name: "업그레이드 계획 표시"
+  debug:
+    msg: "{{ upgrade_plan_output.stdout_lines }}"
+  when: 
+    - not k8s_skip_upgrade
+    - upgrade_plan_output is defined
+
+# 업그레이드 적용
+- name: "kubeadm 업그레이드 적용"
+  command: "kubeadm upgrade apply {{ k8s_target_version }} --yes"
+  register: upgrade_apply_result
+  when: not k8s_skip_upgrade
+  async: "{{ k8s_upgrade_timeout }}"
+  poll: 30
+
+- name: "kubeadm 업그레이드 결과 확인"
+  debug:
+    msg: "kubeadm 업그레이드 {{ '성공' if upgrade_apply_result.rc == 0 else '실패' }}"
+  when: 
+    - not k8s_skip_upgrade
+    - upgrade_apply_result is defined
+
+- name: "kubeadm 업그레이드 실패 시 중단"
+  fail:
+    msg: "kubeadm 업그레이드가 실패했습니다: {{ upgrade_apply_result.stderr }}"
+  when: 
+    - not k8s_skip_upgrade
+    - upgrade_apply_result is defined
+    - upgrade_apply_result.rc != 0
+
+# 노드 드레인 (다른 노드가 있는 경우)
+- name: "노드 드레인 수행"
+  command: "kubectl drain {{ inventory_hostname }} --ignore-daemonsets --delete-emptydir-data --force --timeout={{ k8s_upgrade_drain_timeout }}s"
+  register: drain_result
+  when: 
+    - not k8s_skip_upgrade
+    - not k8s_upgrade_skip_drain
+    - groups['all'] | length > 1
+  ignore_errors: true
+
+- name: "노드 드레인 결과"
+  debug:
+    msg: "노드 드레인 {{ '성공' if drain_result.rc == 0 else '실패' }}"
+  when: 
+    - not k8s_skip_upgrade
+    - not k8s_upgrade_skip_drain
+    - drain_result is defined
+
+# kubelet 및 kubectl 업그레이드
+- name: "kubelet 및 kubectl 업그레이드 (패키지 방식)"
+  include_tasks: install_packages.yml
+  vars:
+    k8s_packages_to_install:
+      - "kubelet={{ k8s_target_version | regex_replace('^v', '') }}-*"
+      - "kubectl={{ k8s_target_version | regex_replace('^v', '') }}-*"
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_detected_package_manager in ['yum', 'apt']
+
+- name: "kubelet 및 kubectl 업그레이드 (바이너리 방식)"
+  include_tasks: install_binaries.yml
+  vars:
+    k8s_binaries_to_install:
+      - kubelet
+      - kubectl
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_detected_package_manager == 'binary'
+
+# kubelet 서비스 재시작
+- name: "systemd 데몬 리로드"
+  systemd:
+    daemon_reload: yes
+  when: not k8s_skip_upgrade
+
+- name: "kubelet 서비스 재시작"
+  systemd:
+    name: kubelet
+    state: restarted
+    enabled: yes
+  when: not k8s_skip_upgrade
+
+# 노드 언코든
+- name: "노드 언코든 수행"
+  command: "kubectl uncordon {{ inventory_hostname }}"
+  register: uncordon_result
+  when: 
+    - not k8s_skip_upgrade
+    - not k8s_upgrade_skip_cordon
+    - not k8s_upgrade_skip_drain
+  ignore_errors: true
+
+- name: "노드 언코든 결과"
+  debug:
+    msg: "노드 언코든 {{ '성공' if uncordon_result.rc == 0 else '실패' }}"
+  when: 
+    - not k8s_skip_upgrade
+    - not k8s_upgrade_skip_cordon
+    - uncordon_result is defined
+
+# 업그레이드 검증
+- name: "노드 상태 확인"
+  command: kubectl get nodes {{ inventory_hostname }}
+  register: node_status
+  until: "'Ready' in node_status.stdout"
+  retries: "{{ k8s_health_check_retries }}"
+  delay: "{{ k8s_health_check_delay }}"
+  when: not k8s_skip_upgrade
+
+- name: "컨트롤 플레인 구성 요소 상태 확인"
+  uri:
+    url: "https://{{ ansible_default_ipv4.address }}:6443/healthz"
+    method: GET
+    validate_certs: no
+    status_code: 200
+  register: api_health
+  until: api_health.status == 200
+  retries: "{{ k8s_health_check_retries }}"
+  delay: "{{ k8s_health_check_delay }}"
+  when: not k8s_skip_upgrade
+
+- name: "업그레이드된 버전 확인"
+  command: kubectl version --short
+  register: upgraded_version
+  when: not k8s_skip_upgrade
+
+- name: "업그레이드 결과 표시"
+  debug:
+    msg:
+      - "=== 컨트롤 플레인 업그레이드 완료 ==="
+      - "{{ upgraded_version.stdout_lines }}"
+  when: 
+    - not k8s_skip_upgrade
+    - upgraded_version is defined
+
+- name: "컨트롤 플레인 업그레이드 완료"
+  debug:
+    msg: "첫 번째 컨트롤 플레인 노드 업그레이드가 완료되었습니다." 

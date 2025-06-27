@@ -1,0 +1,117 @@
+---
+# 패키지 설치/업그레이드
+
+- name: "패키지 설치 시작"
+  debug:
+    msg: "패키지 설치를 시작합니다: {{ k8s_packages_to_install | join(', ') }}"
+
+# yum 저장소 설정 (선택된 repo 사용)
+- name: "Kubernetes yum 저장소 설정"
+  yum_repository:
+    name: "{{ k8s_selected_repo_config.yum.repo_name }}"
+    description: "Kubernetes Repository ({{ 'Official' if k8s_use_official_repo | default(false) else 'Legacy' }})"
+    baseurl: "{{ k8s_selected_repo_config.yum.repo_baseurl }}"
+    gpgcheck: yes
+    gpgkey: "{{ k8s_selected_repo_config.yum.gpg_key }}"
+    enabled: yes
+    exclude: "kubelet kubeadm kubectl cri-tools kubernetes-cni"
+  when: 
+    - k8s_detected_package_manager == "yum"
+    - not k8s_repo_configured
+
+# apt 저장소 설정 (선택된 repo 사용)
+- name: "Kubernetes GPG 키 추가"
+  get_url:
+    url: "{{ k8s_selected_repo_config.yum.gpg_key if k8s_use_official_repo | default(false) else 'https://packages.cloud.google.com/apt/doc/apt-key.gpg' }}"
+    dest: "{{ k8s_selected_repo_config.apt.keyring_path }}"
+    mode: '0644'
+  when: 
+    - k8s_detected_package_manager == "apt"
+    - not k8s_repo_configured
+
+- name: "Kubernetes apt 저장소 설정"
+  apt_repository:
+    repo: "deb [signed-by={{ k8s_selected_repo_config.apt.keyring_path }}] {{ k8s_selected_repo_config.apt.repo_url }} {{ 'kubernetes-xenial' if not k8s_use_official_repo | default(false) else '' }} main"
+    state: present
+    filename: kubernetes
+  when: 
+    - k8s_detected_package_manager == "apt"
+    - not k8s_repo_configured
+
+# 패키지 언홀드 (apt)
+- name: "패키지 언홀드 (apt)"
+  command: "apt-mark unhold {{ item | regex_replace('=.*', '') }}"
+  loop: "{{ k8s_packages_to_install }}"
+  when: 
+    - k8s_detected_package_manager == "apt"
+    - k8s_package_hold
+  ignore_errors: true
+
+# 패키지 설치 (yum)
+- name: "패키지 설치 (yum)"
+  yum:
+    name: "{{ k8s_packages_to_install }}"
+    state: present
+    disable_excludes: kubernetes
+    update_cache: yes
+  when: k8s_detected_package_manager == "yum"
+
+# 패키지 설치 (apt)
+- name: "패키지 업데이트 (apt)"
+  apt:
+    update_cache: yes
+  when: k8s_detected_package_manager == "apt"
+
+- name: "패키지 설치 (apt)"
+  apt:
+    name: "{{ k8s_packages_to_install }}"
+    state: present
+    force: yes
+  when: k8s_detected_package_manager == "apt"
+
+# 패키지 홀드 (apt)
+- name: "패키지 홀드 (apt)"
+  command: "apt-mark hold {{ item | regex_replace('=.*', '') }}"
+  loop: "{{ k8s_packages_to_install }}"
+  when: 
+    - k8s_detected_package_manager == "apt"
+    - k8s_package_hold
+
+# 설치된 버전 확인
+- name: "설치된 패키지 버전 확인 (yum)"
+  shell: "yum list installed | grep {{ item | regex_replace('=.*', '') }}"
+  register: yum_installed_versions
+  loop: "{{ k8s_packages_to_install }}"
+  when: k8s_detected_package_manager == "yum"
+  changed_when: false
+
+- name: "설치된 패키지 버전 확인 (apt)"
+  shell: "dpkg -l | grep {{ item | regex_replace('=.*', '') }}"
+  register: apt_installed_versions
+  loop: "{{ k8s_packages_to_install }}"
+  when: k8s_detected_package_manager == "apt"
+  changed_when: false
+
+- name: "설치된 패키지 버전 표시 (yum)"
+  debug:
+    msg: "{{ item.stdout }}"
+  loop: "{{ yum_installed_versions.results }}"
+  when: 
+    - k8s_detected_package_manager == "yum"
+    - yum_installed_versions is defined
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: "설치된 패키지 버전 표시 (apt)"
+  debug:
+    msg: "{{ item.stdout }}"
+  loop: "{{ apt_installed_versions.results }}"
+  when: 
+    - k8s_detected_package_manager == "apt"
+    - apt_installed_versions is defined
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: "패키지 설치 완료"
+  debug:
+    msg: "패키지 설치가 완료되었습니다." 

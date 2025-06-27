@@ -1,0 +1,53 @@
+# Kubernetes 클러스터 인벤토리
+# 환경에 맞게 IP 주소와 사용자명을 수정하세요
+
+[k8s_masters]
+# 컨트롤 플레인 노드들 (마스터)
+master1 ansible_host=192.168.1.10 ansible_user=rocky
+master2 ansible_host=192.168.1.11 ansible_user=rocky
+master3 ansible_host=192.168.1.12 ansible_user=rocky
+
+[k8s_workers]
+# 워커 노드들
+worker1 ansible_host=192.168.1.20 ansible_user=rocky
+worker2 ansible_host=192.168.1.21 ansible_user=rocky
+worker3 ansible_host=192.168.1.22 ansible_user=rocky
+
+[k8s_cluster:children]
+k8s_masters
+k8s_workers
+
+[k8s_cluster:vars]
+# 공통 연결 설정
+ansible_ssh_private_key_file=~/.ssh/id_rsa
+ansible_ssh_common_args='-o StrictHostKeyChecking=no'
+ansible_become=true
+ansible_become_method=sudo
+ansible_python_interpreter=/usr/bin/python3
+
+# Kubernetes 클러스터 정보
+k8s_cluster_name=metanet-k8s
+k8s_network_cidr=10.244.0.0/16
+k8s_service_cidr=10.96.0.0/12
+
+# 컨테이너 런타임 설정
+k8s_container_runtime=crio
+k8s_cgroup_driver=systemd
+
+# 특정 버전으로 업그레이드하려면 주석 해제
+# k8s_target_version=v1.24.0
+# k8s_force_version=true
+
+# 백업 설정
+k8s_backup_enabled=true
+k8s_backup_dir=/opt/k8s-backup
+k8s_backup_retention_days=7
+
+# 업그레이드 설정
+k8s_upgrade_strategy=rolling
+k8s_upgrade_timeout=1200
+k8s_upgrade_drain_timeout=600
+k8s_upgrade_skip_drain=false
+
+# 인터랙티브 모드 (확인 프롬프트 표시)
+# k8s_interactive_mode=true 

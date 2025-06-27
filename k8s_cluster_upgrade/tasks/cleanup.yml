@@ -1,0 +1,177 @@
+---
+# 정리 작업
+
+- name: "정리 작업 시작"
+  debug:
+    msg: "업그레이드 후 정리 작업을 시작합니다."
+
+# 임시 파일 정리
+- name: "임시 다운로드 파일 정리"
+  find:
+    paths: /tmp
+    patterns: 
+      - "kubelet.service"
+      - "10-kubeadm.conf"
+      - "*k8s*"
+    age: "1d"
+  register: temp_files
+  
+- name: "임시 파일 삭제"
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ temp_files.files }}"
+  when: temp_files.files | length > 0
+
+# 오래된 바이너리 백업 정리
+- name: "오래된 바이너리 백업 파일 찾기"
+  find:
+    paths: "{{ k8s_bin_dir }}"
+    patterns: "*.backup.*"
+    age: "{{ k8s_backup_retention_days }}d"
+  register: old_binary_backups
+
+- name: "오래된 바이너리 백업 파일 삭제"
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ old_binary_backups.files }}"
+  when: old_binary_backups.files | length > 0
+
+# 패키지 캐시 정리
+- name: "패키지 캐시 정리 (yum)"
+  command: yum clean all
+  when: 
+    - k8s_detected_package_manager == "yum"
+    - k8s_needs_package_install | default(false)
+
+- name: "패키지 캐시 정리 (apt)"
+  apt:
+    autoclean: yes
+    autoremove: yes
+  when: 
+    - k8s_detected_package_manager == "apt"
+    - k8s_needs_package_install | default(false)
+
+# 불필요한 컨테이너 이미지 정리 (마스터 노드에서만)
+- name: "사용하지 않는 컨테이너 이미지 정리"
+  shell: |
+    if command -v crictl >/dev/null 2>&1; then
+      crictl rmi --prune
+    fi
+  register: image_cleanup
+  when: 
+    - k8s_detected_role == "master"
+    - k8s_is_first_master | default(false)
+  ignore_errors: true
+
+- name: "이미지 정리 결과"
+  debug:
+    msg: "컨테이너 이미지 정리 완료"
+  when: 
+    - k8s_detected_role == "master"
+    - k8s_is_first_master | default(false)
+    - image_cleanup is defined
+
+# 로그 정리
+- name: "오래된 로그 파일 정리"
+  find:
+    paths: 
+      - /var/log
+      - /var/log/pods
+      - /var/log/containers
+    patterns: "*.log"
+    age: "30d"
+    size: "100m"
+  register: old_logs
+
+- name: "오래된 대용량 로그 파일 압축"
+  command: gzip "{{ item.path }}"
+  loop: "{{ old_logs.files }}"
+  when: 
+    - old_logs.files | length > 0
+    - item.path.endswith('.log')
+  ignore_errors: true
+
+# systemd 저널 정리
+- name: "systemd 저널 정리"
+  shell: journalctl --vacuum-time=7d --vacuum-size=100M
+  ignore_errors: true
+
+# 업그레이드 상태 파일 생성
+- name: "업그레이드 상태 파일 생성"
+  copy:
+    content: |
+      # Kubernetes 클러스터 업그레이드 완료 정보
+      업그레이드 완료 시간: {{ ansible_date_time.iso8601 }}
+      호스트명: {{ inventory_hostname }}
+      노드 역할: {{ k8s_detected_role }}
+      이전 버전: {{ k8s_current_version }}
+      현재 버전: {{ k8s_target_version }}
+      업그레이드 방법: {{ k8s_detected_package_manager }}
+      백업 위치: {{ k8s_current_backup_dir | default('N/A') }}
+      
+      # 최종 상태
+      업그레이드 성공: {{ 'Yes' if not k8s_skip_upgrade else 'Skipped' }}
+      검증 완료: {{ 'Yes' if k8s_verify_upgrade else 'Skipped' }}
+    dest: "{{ k8s_config_dir }}/upgrade-status-{{ ansible_date_time.epoch }}.txt"
+    mode: '0644'
+
+# 재부팅 필요 여부 확인
+- name: "재부팅 필요 여부 확인 (yum)"
+  shell: needs-restarting -r
+  register: reboot_required_yum
+  failed_when: false
+  when: ansible_os_family == "RedHat"
+
+- name: "재부팅 필요 여부 확인 (apt)"
+  stat:
+    path: /var/run/reboot-required
+  register: reboot_required_apt
+  when: ansible_os_family == "Debian"
+
+- name: "재부팅 권장 알림 (yum)"
+  debug:
+    msg: "경고: 시스템 재부팅이 권장됩니다."
+  when: 
+    - ansible_os_family == "RedHat"
+    - reboot_required_yum.rc == 1
+
+- name: "재부팅 권장 알림 (apt)"
+  debug:
+    msg: "경고: 시스템 재부팅이 필요합니다."
+  when: 
+    - ansible_os_family == "Debian"
+    - reboot_required_apt.stat.exists
+
+# 서비스 상태 최종 확인
+- name: "중요 서비스 상태 확인"
+  systemd:
+    name: "{{ item }}"
+  register: service_status
+  loop:
+    - kubelet
+    - crio
+  failed_when: false
+
+- name: "서비스 상태 표시"
+  debug:
+    msg: "{{ item.item }}: {{ item.status.ActiveState | default('not found') }}"
+  loop: "{{ service_status.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+# 최종 메시지
+- name: "정리 작업 완료"
+  debug:
+    msg:
+      - "=== 정리 작업 완료 ==="
+      - "임시 파일 정리: 완료"
+      - "패키지 캐시 정리: 완료" 
+      - "오래된 백업 파일 정리: 완료"
+      - "로그 파일 정리: 완료"
+      - "업그레이드 상태 파일: {{ k8s_config_dir }}/upgrade-status-{{ ansible_date_time.epoch }}.txt"
+
+- name: "업그레이드 프로세스 완료"
+  debug:
+    msg: "Kubernetes 클러스터 업그레이드 프로세스가 모두 완료되었습니다." 

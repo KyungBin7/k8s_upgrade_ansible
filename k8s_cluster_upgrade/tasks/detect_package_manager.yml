@@ -1,0 +1,145 @@
+---
+# 패키지 관리자 감지 및 설정
+
+- name: "수동 패키지 관리자 설정 확인"
+  debug:
+    msg: "수동으로 설정된 패키지 관리자: {{ k8s_package_manager }}"
+  when: k8s_package_manager != "auto"
+
+# OS별 패키지 관리자 자동 감지
+- name: "Red Hat 계열 패키지 관리자 감지"
+  set_fact:
+    k8s_detected_package_manager: "yum"
+  when:
+    - k8s_package_manager == "auto"
+    - ansible_os_family == "RedHat"
+
+- name: "Debian 계열 패키지 관리자 감지"
+  set_fact:
+    k8s_detected_package_manager: "apt"
+  when:
+    - k8s_package_manager == "auto"
+    - ansible_os_family == "Debian"
+
+# 바이너리 설치 여부 확인
+- name: "패키지 매니저 설치 여부 확인 (yum)"
+  shell: "yum list installed | grep -E 'kubelet|kubeadm|kubectl'"
+  register: yum_k8s_packages
+  failed_when: false
+  changed_when: false
+  when: 
+    - k8s_detected_package_manager == "yum"
+    - k8s_package_manager == "auto"
+
+- name: "패키지 매니저 설치 여부 확인 (apt)"
+  shell: "dpkg -l | grep -E 'kubelet|kubeadm|kubectl'"
+  register: apt_k8s_packages
+  failed_when: false
+  changed_when: false
+  when: 
+    - k8s_detected_package_manager == "apt"
+    - k8s_package_manager == "auto"
+
+# 바이너리 설치로 변경
+- name: "바이너리 설치 모드로 변경 (yum - 패키지 없음)"
+  set_fact:
+    k8s_detected_package_manager: "binary"
+  when:
+    - k8s_detected_package_manager == "yum"
+    - k8s_package_manager == "auto"
+    - yum_k8s_packages.stdout == ""
+
+- name: "바이너리 설치 모드로 변경 (apt - 패키지 없음)"
+  set_fact:
+    k8s_detected_package_manager: "binary"
+  when:
+    - k8s_detected_package_manager == "apt"
+    - k8s_package_manager == "auto"
+    - apt_k8s_packages.stdout == ""
+
+# 수동 설정 적용
+- name: "수동 설정된 패키지 관리자 사용"
+  set_fact:
+    k8s_detected_package_manager: "{{ k8s_package_manager }}"
+  when: k8s_package_manager != "auto"
+
+# 기본값 설정
+- name: "기본 패키지 관리자 설정"
+  set_fact:
+    k8s_detected_package_manager: "binary"
+  when: k8s_detected_package_manager is not defined
+
+# 패키지 관리자별 설정 검증
+- name: "yum 명령어 존재 확인"
+  command: which yum
+  register: yum_available
+  failed_when: false
+  changed_when: false
+  when: k8s_detected_package_manager == "yum"
+
+- name: "apt 명령어 존재 확인"
+  command: which apt-get
+  register: apt_available
+  failed_when: false
+  changed_when: false
+  when: k8s_detected_package_manager == "apt"
+
+- name: "패키지 관리자 사용 불가 시 바이너리로 변경"
+  set_fact:
+    k8s_detected_package_manager: "binary"
+  when:
+    - (k8s_detected_package_manager == "yum" and yum_available.rc != 0) or
+      (k8s_detected_package_manager == "apt" and apt_available.rc != 0)
+
+# Kubernetes 저장소 설정 확인
+- name: "Kubernetes yum 저장소 확인"
+  stat:
+    path: /etc/yum.repos.d/kubernetes.repo
+  register: k8s_yum_repo
+  when: k8s_detected_package_manager == "yum"
+
+- name: "Kubernetes apt 저장소 확인"
+  stat:
+    path: /etc/apt/sources.list.d/kubernetes.list
+  register: k8s_apt_repo
+  when: k8s_detected_package_manager == "apt"
+
+# 저장소 설정 상태 저장
+- name: "yum 저장소 상태 저장"
+  set_fact:
+    k8s_repo_configured: "{{ k8s_yum_repo.stat.exists }}"
+  when: k8s_detected_package_manager == "yum"
+
+- name: "apt 저장소 상태 저장"
+  set_fact:
+    k8s_repo_configured: "{{ k8s_apt_repo.stat.exists }}"
+  when: k8s_detected_package_manager == "apt"
+
+- name: "바이너리 설치 모드 저장소 상태"
+  set_fact:
+    k8s_repo_configured: false
+  when: k8s_detected_package_manager == "binary"
+
+# 패키지 관리자 정보 표시
+- name: "패키지 관리자 정보 표시"
+  debug:
+    msg:
+      - "=== 패키지 관리자 정보 ==="
+      - "감지된 패키지 관리자: {{ k8s_detected_package_manager }}"
+      - "OS 계열: {{ ansible_os_family }}"
+      - "저장소 구성됨: {{ k8s_repo_configured | default('N/A') }}"
+
+# 바이너리 설치 필요 정보 설정
+- name: "바이너리 설치 필요 여부 설정"
+  set_fact:
+    k8s_needs_binary_install: true
+  when: k8s_detected_package_manager == "binary"
+
+- name: "패키지 설치 필요 여부 설정"
+  set_fact:
+    k8s_needs_package_install: true
+  when: k8s_detected_package_manager in ['yum', 'apt']
+
+- name: "패키지 관리자 감지 완료"
+  debug:
+    msg: "패키지 관리자 감지가 완료되었습니다: {{ k8s_detected_package_manager }}" 

@@ -1,0 +1,120 @@
+---
+# K8s 공식 repo 버전 체크
+
+- name: "공식 repo 버전 체크 시작"
+  debug:
+    msg: "Kubernetes 공식 repository에서 {{ k8s_target_version }} 버전 지원 여부를 확인합니다"
+
+# 목표 버전의 마이너 버전 추출
+- name: "목표 버전 마이너 버전 추출"
+  set_fact:
+    k8s_target_minor_for_repo: "{{ k8s_target_version | regex_replace('^v?([0-9]+\\.[0-9]+).*', '\\1') }}"
+
+- name: "목표 마이너 버전 표시"
+  debug:
+    msg: "목표 마이너 버전: {{ k8s_target_minor_for_repo }}"
+
+# 공식 repo 지원 버전 확인 (yum)
+- name: "공식 repo 지원 확인 (YUM)"
+  uri:
+    url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_minor_for_repo }}/rpm/repodata/repomd.xml"
+    method: HEAD
+    timeout: 10
+    status_code: [200, 404]
+  register: official_repo_yum_check
+  when: ansible_os_family == "RedHat"
+  ignore_errors: true
+
+# 공식 repo 지원 버전 확인 (apt)
+- name: "공식 repo 지원 확인 (APT)"
+  uri:
+    url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_minor_for_repo }}/deb/Release"
+    method: HEAD
+    timeout: 10
+    status_code: [200, 404]
+  register: official_repo_apt_check
+  when: ansible_os_family == "Debian"
+  ignore_errors: true
+
+# 공식 repo 사용 가능 여부 결정
+- name: "공식 repo 사용 가능 여부 결정 (YUM)"
+  set_fact:
+    k8s_use_official_repo: "{{ official_repo_yum_check.status == 200 }}"
+  when: 
+    - ansible_os_family == "RedHat"
+    - official_repo_yum_check is defined
+
+- name: "공식 repo 사용 가능 여부 결정 (APT)"
+  set_fact:
+    k8s_use_official_repo: "{{ official_repo_apt_check.status == 200 }}"
+  when: 
+    - ansible_os_family == "Debian"
+    - official_repo_apt_check is defined
+
+# 바이너리 설치의 경우 항상 공식 repo 사용
+- name: "바이너리 설치 시 공식 repo 사용"
+  set_fact:
+    k8s_use_official_repo: true
+  when: k8s_detected_package_manager == 'binary'
+
+# repo 사용 결정 알림
+- name: "공식 repo 사용 결정 알림"
+  debug:
+    msg: |
+      {% if k8s_use_official_repo | default(false) %}
+      ✓ Kubernetes 공식 repository를 사용하여 {{ k8s_target_version }} 버전으로 업그레이드합니다
+      Repository: https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_minor_for_repo }}
+      {% else %}
+      ⚠ Kubernetes 공식 repository에서 {{ k8s_target_version }} 버전을 지원하지 않습니다
+      레거시 repository를 사용합니다: {{ 'packages.cloud.google.com (yum)' if ansible_os_family == 'RedHat' else 'apt.kubernetes.io (apt)' }}
+      {% endif %}
+
+# 사용할 repo 설정 결정
+- name: "사용할 repo 설정 결정"
+  set_fact:
+    k8s_selected_repo_config: "{{ k8s_official_repo_config if k8s_use_official_repo | default(false) else k8s_package_config }}"
+
+- name: "선택된 repo 설정 표시"
+  debug:
+    msg:
+      - "=== 선택된 Repository 설정 ==="
+      - "YUM Repository: {{ k8s_selected_repo_config.yum.repo_baseurl | default('N/A') }}"
+      - "APT Repository: {{ k8s_selected_repo_config.apt.repo_url | default('N/A') }}"
+      - "GPG Key: {{ k8s_selected_repo_config.yum.gpg_key | default(k8s_selected_repo_config.apt.keyring_path) | default('N/A') }}"
+
+# repo 체크 결과를 파일에 기록
+- name: "repo 체크 결과 기록"
+  copy:
+    content: |
+      # Kubernetes Repository Check Results
+      Target Version: {{ k8s_target_version }}
+      Target Minor Version: {{ k8s_target_minor_for_repo }}
+      Use Official Repo: {{ k8s_use_official_repo | default(false) }}
+      OS Family: {{ ansible_os_family }}
+      Package Manager: {{ k8s_detected_package_manager }}
+      Check Time: {{ ansible_date_time.iso8601 }}
+      
+      {% if ansible_os_family == "RedHat" and official_repo_yum_check is defined %}
+      YUM Repo Check Status: {{ official_repo_yum_check.status | default('Failed') }}
+      YUM Repo URL: https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_minor_for_repo }}/rpm/
+      {% endif %}
+      
+      {% if ansible_os_family == "Debian" and official_repo_apt_check is defined %}
+      APT Repo Check Status: {{ official_repo_apt_check.status | default('Failed') }}
+      APT Repo URL: https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_minor_for_repo }}/deb/
+      {% endif %}
+      
+      Selected Repository:
+      {% if k8s_use_official_repo | default(false) %}
+      - Type: Official Kubernetes Repository
+      - URL: {{ k8s_selected_repo_config.yum.repo_baseurl if ansible_os_family == "RedHat" else k8s_selected_repo_config.apt.repo_url }}
+      {% else %}
+      - Type: Legacy Repository
+      - URL: {{ k8s_selected_repo_config.yum.repo_baseurl if ansible_os_family == "RedHat" else k8s_selected_repo_config.apt.repo_url }}
+      {% endif %}
+    dest: "{{ k8s_backup_dir | default('/tmp') }}/k8s-repo-check-{{ ansible_date_time.epoch }}.txt"
+    mode: '0644'
+
+- name: "공식 repo 체크 완료"
+  debug:
+    msg: "Kubernetes 공식 repository 체크가 완료되었습니다" 

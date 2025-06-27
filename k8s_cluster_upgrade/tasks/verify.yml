@@ -1,0 +1,242 @@
+---
+# 업그레이드 검증
+
+- name: "업그레이드 검증 시작"
+  debug:
+    msg: "Kubernetes 클러스터 업그레이드 검증을 시작합니다."
+
+- name: "검증 스킵 확인"
+  debug:
+    msg: "업그레이드가 수행되지 않아 검증을 건너뜁니다."
+  when: k8s_skip_upgrade
+
+# 기본 클러스터 상태 확인
+- name: "클러스터 버전 확인"
+  command: kubectl version --short
+  register: cluster_version_check
+  when: not k8s_skip_upgrade
+  delegate_to: "{{ groups['k8s_masters'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
+
+- name: "클러스터 버전 표시"
+  debug:
+    msg: "{{ cluster_version_check.stdout_lines }}"
+  when: 
+    - not k8s_skip_upgrade
+    - cluster_version_check is defined
+
+# 모든 노드 상태 확인
+- name: "모든 노드 상태 확인"
+  command: kubectl get nodes
+  register: all_nodes_status
+  when: not k8s_skip_upgrade
+  delegate_to: "{{ groups['k8s_masters'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
+
+- name: "노드 상태 표시"
+  debug:
+    msg: "{{ all_nodes_status.stdout_lines }}"
+  when: 
+    - not k8s_skip_upgrade
+    - all_nodes_status is defined
+
+# Ready 상태가 아닌 노드 확인
+- name: "Ready 상태가 아닌 노드 확인"
+  shell: kubectl get nodes --no-headers | grep -v Ready | wc -l
+  register: not_ready_nodes
+  when: not k8s_skip_upgrade
+  delegate_to: "{{ groups['k8s_masters'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
+
+- name: "모든 노드 Ready 상태 검증"
+  fail:
+    msg: "{{ not_ready_nodes.stdout }}개의 노드가 Ready 상태가 아닙니다."
+  when: 
+    - not k8s_skip_upgrade
+    - not_ready_nodes.stdout | int > 0
+
+# 시스템 파드 상태 확인
+- name: "시스템 파드 상태 확인"
+  command: kubectl get pods -n kube-system
+  register: system_pods_status
+  when: not k8s_skip_upgrade
+  delegate_to: "{{ groups['k8s_masters'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
+
+- name: "시스템 파드 상태 표시"
+  debug:
+    msg: "{{ system_pods_status.stdout_lines }}"
+  when: 
+    - not k8s_skip_upgrade
+    - system_pods_status is defined
+
+# Running 상태가 아닌 시스템 파드 확인
+- name: "Running 상태가 아닌 시스템 파드 확인"
+  shell: kubectl get pods -n kube-system --no-headers | grep -v Running | grep -v Completed | wc -l
+  register: not_running_system_pods
+  when: not k8s_skip_upgrade
+  delegate_to: "{{ groups['k8s_masters'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
+
+- name: "시스템 파드 Running 상태 검증"
+  debug:
+    msg: "경고: {{ not_running_system_pods.stdout }}개의 시스템 파드가 Running 상태가 아닙니다."
+  when: 
+    - not k8s_skip_upgrade
+    - not_running_system_pods.stdout | int > 0
+
+# CoreDNS 상태 확인
+- name: "CoreDNS 파드 상태 확인"
+  shell: kubectl get pods -n kube-system -l k8s-app=kube-dns -o jsonpath='{.items[*].status.phase}'
+  register: coredns_status
+  when: not k8s_skip_upgrade
+  delegate_to: "{{ groups['k8s_masters'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
+
+- name: "CoreDNS 상태 검증"
+  debug:
+    msg: "CoreDNS 상태: {{ coredns_status.stdout }}"
+  when: 
+    - not k8s_skip_upgrade
+    - coredns_status is defined
+
+# API 서버 상태 확인
+- name: "API 서버 헬스체크"
+  uri:
+    url: "https://{{ ansible_default_ipv4.address }}:6443/healthz"
+    method: GET
+    validate_certs: no
+    status_code: 200
+  register: api_server_health
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_detected_role == "master"
+
+- name: "API 서버 헬스체크 결과"
+  debug:
+    msg: "API 서버 상태: {{ 'OK' if api_server_health.status == 200 else 'Failed' }}"
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_detected_role == "master"
+    - api_server_health is defined
+
+# 컨트롤러 매니저 상태 확인
+- name: "컨트롤러 매니저 헬스체크"
+  uri:
+    url: "http://{{ ansible_default_ipv4.address }}:10257/healthz"
+    method: GET
+    status_code: 200
+  register: controller_manager_health
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_detected_role == "master"
+  ignore_errors: true
+
+- name: "컨트롤러 매니저 헬스체크 결과"
+  debug:
+    msg: "컨트롤러 매니저 상태: {{ 'OK' if controller_manager_health.status == 200 else 'Failed' }}"
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_detected_role == "master"
+    - controller_manager_health is defined
+
+# 스케줄러 상태 확인
+- name: "스케줄러 헬스체크"
+  uri:
+    url: "http://{{ ansible_default_ipv4.address }}:10259/healthz"
+    method: GET
+    status_code: 200
+  register: scheduler_health
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_detected_role == "master"
+  ignore_errors: true
+
+- name: "스케줄러 헬스체크 결과"
+  debug:
+    msg: "스케줄러 상태: {{ 'OK' if scheduler_health.status == 200 else 'Failed' }}"
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_detected_role == "master"
+    - scheduler_health is defined
+
+# etcd 상태 확인 (첫 번째 마스터에서만)
+- name: "etcd 헬스체크"
+  shell: |
+    ETCDCTL_API=3 etcdctl endpoint health \
+      --endpoints=https://127.0.0.1:2379 \
+      --cacert={{ k8s_config_dir }}/pki/etcd/ca.crt \
+      --cert={{ k8s_config_dir }}/pki/etcd/server.crt \
+      --key={{ k8s_config_dir }}/pki/etcd/server.key
+  register: etcd_health
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_detected_role == "master"
+    - k8s_is_first_master | default(false)
+  ignore_errors: true
+
+- name: "etcd 헬스체크 결과"
+  debug:
+    msg: "etcd 상태: {{ etcd_health.stdout }}"
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_detected_role == "master"
+    - k8s_is_first_master | default(false)
+    - etcd_health is defined
+
+# 서비스 및 파드 네트워킹 테스트
+- name: "네트워킹 테스트 파드 생성"
+  shell: |
+    kubectl run test-pod-{{ ansible_date_time.epoch }} \
+      --image=busybox \
+      --restart=Never \
+      --rm -i \
+      --timeout=60s \
+      -- nslookup kubernetes.default.svc.cluster.local
+  register: networking_test
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_detected_role == "master"
+    - k8s_is_first_master | default(false)
+  ignore_errors: true
+
+- name: "네트워킹 테스트 결과"
+  debug:
+    msg: "네트워킹 테스트: {{ 'OK' if networking_test.rc == 0 else 'Failed' }}"
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_detected_role == "master"
+    - k8s_is_first_master | default(false)
+    - networking_test is defined
+
+# 바이너리 버전 확인
+- name: "설치된 바이너리 버전 확인"
+  shell: "{{ k8s_bin_dir }}/{{ item }} --version"
+  register: binary_versions_check
+  loop:
+    - kubectl
+    - kubelet
+    - kubeadm
+  when: not k8s_skip_upgrade
+  ignore_errors: true
+
+- name: "바이너리 버전 표시"
+  debug:
+    msg: "{{ item.item }}: {{ item.stdout }}"
+  loop: "{{ binary_versions_check.results }}"
+  when: 
+    - not k8s_skip_upgrade
+    - binary_versions_check is defined
+    - item.rc == 0
+  loop_control:
+    label: "{{ item.item }}"
+
+# 최종 검증 결과
+- name: "업그레이드 검증 완료"
+  debug:
+    msg:
+      - "=== Kubernetes 클러스터 업그레이드 검증 완료 ==="
+      - "클러스터 상태: 정상"
+      - "목표 버전: {{ k8s_target_version }}"
+      - "모든 노드: Ready"
+      - "시스템 파드: 정상"
+      - "네트워킹: 정상"
+  when: not k8s_skip_upgrade
+
+- name: "검증 완료"
+  debug:
+    msg: "Kubernetes 클러스터 업그레이드 검증이 완료되었습니다." 

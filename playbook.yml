@@ -1,0 +1,113 @@
+---
+# Kubernetes 클러스터 업그레이드 플레이북
+# 사용법: ansible-playbook -i inventory/hosts playbook.yml
+
+- name: "Kubernetes 클러스터 업그레이드"
+  hosts: k8s_cluster
+  become: yes
+  gather_facts: yes
+  serial: "{{ k8s_upgrade_strategy == 'all-at-once' | ternary('100%', 1) }}"
+  
+  vars:
+    # 기본 설정 - 자동 버전 업그레이드
+    k8s_current_version: ""  # 자동 감지
+    k8s_target_version: ""   # 다음 마이너 버전으로 자동 설정
+    k8s_force_version: false
+    
+    # 업그레이드 전략
+    k8s_upgrade_strategy: "rolling"  # rolling 또는 all-at-once
+    k8s_upgrade_timeout: 900  # 15분
+    k8s_upgrade_drain_timeout: 600  # 10분
+    k8s_upgrade_skip_drain: false
+    k8s_upgrade_skip_cordon: false
+    
+    # 백업 설정
+    k8s_backup_enabled: true
+    k8s_backup_dir: "/opt/k8s-backup"
+    k8s_backup_retention_days: 7
+    
+    # 검증 설정
+    k8s_verify_upgrade: true
+    k8s_health_check_retries: 30
+    k8s_health_check_delay: 10
+    
+    # 로그 설정
+    k8s_log_level: "info"
+    k8s_log_file: "/var/log/k8s-upgrade.log"
+    
+    # CRI-O 런타임 설정
+    k8s_container_runtime: "crio"
+
+  pre_tasks:
+    - name: "업그레이드 시작 알림"
+      debug:
+        msg: |
+          ==========================================
+          🚀 Kubernetes 클러스터 업그레이드 시작
+          ==========================================
+          📍 타겟 호스트: {{ inventory_hostname }}
+          🕐 시작 시간: {{ ansible_date_time.iso8601 }}
+          🔧 OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+          💾 메모리: {{ ansible_memtotal_mb }}MB
+          💿 디스크: {{ ansible_mounts[0].size_available }}
+          🔗 IP: {{ ansible_default_ipv4.address }}
+          ==========================================
+      tags: always
+
+    - name: "업그레이드 사전 알림"
+      pause:
+        prompt: |
+          ⚠️  중요: Kubernetes 클러스터 업그레이드를 시작합니다.
+          
+          📋 체크리스트:
+          ✅ 클러스터 백업이 준비되었나요?
+          ✅ 업그레이드 중 서비스 중단을 예상하고 있나요?
+          ✅ 문제 발생 시 롤백 계획이 있나요?
+          
+          계속하려면 Enter를 누르세요 (Ctrl+C로 취소)
+      when: 
+        - k8s_interactive_mode | default(false)
+        - not ansible_check_mode
+      tags: always
+
+  roles:
+    - k8s_cluster_upgrade
+
+  post_tasks:
+    - name: "업그레이드 완료 알림"
+      debug:
+        msg: |
+          ==========================================
+          🎉 Kubernetes 클러스터 업그레이드 완료!
+          ==========================================
+          📍 호스트: {{ inventory_hostname }}
+          🕐 완료 시간: {{ ansible_date_time.iso8601 }}
+          📊 이전 버전: {{ k8s_current_version | default('감지 실패') }}
+          📊 현재 버전: {{ k8s_target_version | default('업그레이드 실패') }}
+          💾 백업 위치: {{ k8s_current_backup_dir | default('백업 없음') }}
+          ==========================================
+      tags: always
+
+    - name: "재부팅 필요 여부 알림"
+      debug:
+        msg: |
+          ⚠️  알림: 시스템 재부팅이 권장됩니다.
+          다음 명령어로 재부팅하세요:
+          sudo systemctl reboot
+      when: 
+        - ansible_os_family == "RedHat" and reboot_required_yum is defined and reboot_required_yum.rc == 1
+        - or ansible_os_family == "Debian" and reboot_required_apt is defined and reboot_required_apt.stat.exists
+      tags: always
+
+  handlers:
+    - name: restart kubelet
+      systemd:
+        name: kubelet
+        state: restarted
+        enabled: yes
+      
+    - name: restart crio
+      systemd:
+        name: crio
+        state: restarted
+        enabled: yes 

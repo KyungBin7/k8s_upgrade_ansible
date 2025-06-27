@@ -1,0 +1,134 @@
+---
+# 사전 검사 태스크
+
+- name: "시스템 정보 수집"
+  setup:
+    gather_subset:
+      - "!all"
+      - "!any"
+      - "network"
+      - "hardware"
+      - "virtual"
+      - "facter"
+      - "ohai"
+
+- name: "OS 호환성 검사"
+  debug:
+    msg: "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+- name: "최소 요구사항 검사 - 메모리"
+  fail:
+    msg: "메모리가 부족합니다. 최소 2GB 필요, 현재: {{ ansible_memtotal_mb }}MB"
+  when: ansible_memtotal_mb < 2048
+
+- name: "최소 요구사항 검사 - 디스크 공간"
+  shell: df -h / | tail -1 | awk '{print $4}' | sed 's/G//'
+  register: available_disk_space
+  changed_when: false
+
+- name: "디스크 공간 검증"
+  fail:
+    msg: "디스크 공간이 부족합니다. 최소 10GB 필요"
+  when: available_disk_space.stdout | int < 10
+
+- name: "필수 명령어 존재 확인"
+  command: "which {{ item }}"
+  register: command_check
+  failed_when: command_check.rc != 0
+  changed_when: false
+  loop:
+    - systemctl
+    - curl
+    - tar
+    - gzip
+
+- name: "Kubernetes 바이너리 존재 확인"
+  stat:
+    path: "{{ k8s_bin_dir }}/{{ item }}"
+  register: k8s_binary_stat
+  loop:
+    - kubectl
+    - kubelet
+    - kubeadm
+  when: k8s_enable_kubeadm
+
+- name: "Kubernetes 바이너리 상태 저장"
+  set_fact:
+    k8s_binaries_exist: "{{ k8s_binary_stat.results | selectattr('stat.exists', 'equalto', true) | list | length == 3 }}"
+  when: k8s_enable_kubeadm
+
+- name: "Kubernetes 설정 디렉토리 확인"
+  stat:
+    path: "{{ k8s_config_dir }}"
+  register: k8s_config_stat
+
+- name: "네트워크 연결 확인"
+  uri:
+    url: "{{ k8s_binary_base_url }}/stable.txt"
+    method: GET
+    timeout: 10
+  register: network_check
+  ignore_errors: true
+
+- name: "네트워크 연결 실패 알림"
+  debug:
+    msg: "경고: Kubernetes 다운로드 서버에 연결할 수 없습니다. 오프라인 모드로 진행합니다."
+  when: network_check.failed | default(false)
+
+- name: "방화벽 상태 확인"
+  command: systemctl is-active firewalld
+  register: firewall_status
+  ignore_errors: true
+  changed_when: false
+
+- name: "SELinux 상태 확인"
+  command: getenforce
+  register: selinux_status
+  ignore_errors: true
+  changed_when: false
+
+- name: "swap 상태 확인"
+  command: swapon --show
+  register: swap_status
+  failed_when: false
+  changed_when: false
+
+- name: "swap 사용 경고"
+  debug:
+    msg: "경고: swap이 활성화되어 있습니다. Kubernetes는 swap을 비활성화할 것을 권장합니다."
+  when: swap_status.stdout != ""
+
+- name: "컨테이너 런타임 확인"
+  command: "systemctl is-active {{ item }}"
+  register: runtime_status
+  ignore_errors: true
+  changed_when: false
+  loop:
+    - crio
+    - containerd
+    - docker
+
+- name: "활성 컨테이너 런타임 저장"
+  set_fact:
+    k8s_active_runtime: "{{ item.item }}"
+  when: item.rc == 0
+  loop: "{{ runtime_status.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: "백업 디렉토리 생성"
+  file:
+    path: "{{ k8s_backup_dir }}"
+    state: directory
+    mode: '0755'
+  when: k8s_backup_enabled
+
+- name: "로그 디렉토리 생성"
+  file:
+    path: "{{ k8s_log_file | dirname }}"
+    state: directory
+    mode: '0755'
+
+- name: "사전 검사 완료"
+  debug:
+    msg: "사전 검사가 완료되었습니다." 

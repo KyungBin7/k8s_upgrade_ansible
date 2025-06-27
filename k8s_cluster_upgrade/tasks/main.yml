@@ -1,0 +1,101 @@
+---
+# Kubernetes 클러스터 업그레이드 메인 태스크
+
+- name: "K8s 업그레이드 시작 로그"
+  debug:
+    msg: "Kubernetes 클러스터 업그레이드를 시작합니다"
+
+# 1. 사전 검사 및 환경 준비
+- name: "사전 검사 수행"
+  include_tasks: preflight.yml
+  tags:
+    - preflight
+    - always
+
+# 2. 현재 버전 감지
+- name: "현재 Kubernetes 버전 감지"
+  include_tasks: detect_version.yml
+  tags:
+    - detect
+    - always
+
+# 3. 목표 버전 결정
+- name: "목표 버전 결정"
+  include_tasks: determine_target.yml
+  tags:
+    - target
+    - always
+
+# 3.5. 공식 repo 버전 체크
+- name: "공식 repo 버전 체크"
+  include_tasks: check_official_repo.yml
+  tags:
+    - repo-check
+    - always
+
+# 4. 백업 수행
+- name: "백업 수행"
+  include_tasks: backup.yml
+  when: k8s_backup_enabled
+  tags:
+    - backup
+
+# 5. 노드 역할 감지
+- name: "노드 역할 감지"
+  include_tasks: detect_role.yml
+  tags:
+    - role
+    - always
+
+# 6. 패키지 관리자 감지
+- name: "패키지 관리자 감지"
+  include_tasks: detect_package_manager.yml
+  tags:
+    - package
+    - always
+
+# 7. 컨트롤 플레인 업그레이드 (마스터 노드인 경우)
+- name: "컨트롤 플레인 업그레이드"
+  include_tasks: upgrade_control_plane.yml
+  when: 
+    - k8s_detected_role == 'master'
+    - inventory_hostname == groups['k8s_masters'][0] | default(groups['all'][0])
+  tags:
+    - control-plane
+    - master
+
+# 8. 다른 컨트롤 플레인 노드 업그레이드
+- name: "추가 컨트롤 플레인 노드 업그레이드"
+  include_tasks: upgrade_other_masters.yml
+  when: 
+    - k8s_detected_role == 'master'
+    - inventory_hostname != groups['k8s_masters'][0] | default(groups['all'][0])
+  tags:
+    - control-plane
+    - other-masters
+
+# 9. 워커 노드 업그레이드
+- name: "워커 노드 업그레이드"
+  include_tasks: upgrade_worker.yml
+  when: k8s_detected_role == 'worker'
+  tags:
+    - worker
+
+# 10. 업그레이드 후 검증
+- name: "업그레이드 검증"
+  include_tasks: verify.yml
+  when: k8s_verify_upgrade
+  tags:
+    - verify
+    - always
+
+# 11. 정리 작업
+- name: "정리 작업"
+  include_tasks: cleanup.yml
+  tags:
+    - cleanup
+    - always
+
+- name: "K8s 업그레이드 완료 로그"
+  debug:
+    msg: "Kubernetes 클러스터 업그레이드가 완료되었습니다. 버전: {{ k8s_current_version }} -> {{ k8s_target_version }}" 

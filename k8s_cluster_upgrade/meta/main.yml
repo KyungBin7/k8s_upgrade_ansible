@@ -1,0 +1,39 @@
+---
+galaxy_info:
+  author: "MetaNet DevOps Team"
+  description: "Kubernetes 클러스터 업그레이드를 위한 재사용 가능한 Ansible Role"
+  company: "MetaNet"
+  license: "MIT"
+  min_ansible_version: "2.9"
+  
+  platforms:
+    - name: EL
+      versions:
+        - 8
+        - 9
+    - name: Rocky
+      versions:
+        - 8
+        - 9
+    - name: CentOS
+      versions:
+        - 8
+        - 9
+    - name: Ubuntu
+      versions:
+        - 18.04
+        - 20.04
+        - 22.04
+
+  galaxy_tags:
+    - kubernetes
+    - k8s
+    - cluster
+    - upgrade
+    - devops
+    - container
+    - orchestration
+
+dependencies: []
+
+allow_duplicates: false 

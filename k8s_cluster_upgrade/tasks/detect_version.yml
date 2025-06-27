@@ -1,0 +1,132 @@
+---
+# 현재 Kubernetes 버전 감지
+
+- name: "kubectl을 통한 현재 버전 확인"
+  command: kubectl version --client --short
+  register: kubectl_version_output
+  failed_when: false
+  changed_when: false
+
+- name: "kubelet을 통한 현재 버전 확인"
+  command: kubelet --version
+  register: kubelet_version_output
+  failed_when: false
+  changed_when: false
+
+- name: "kubeadm을 통한 현재 버전 확인"
+  command: kubeadm version --output short
+  register: kubeadm_version_output
+  failed_when: false
+  changed_when: false
+  when: k8s_enable_kubeadm
+
+# kubectl 버전 파싱
+- name: "kubectl 버전 파싱"
+  set_fact:
+    k8s_kubectl_version: "{{ kubectl_version_output.stdout | regex_search('v[0-9]+\\.[0-9]+\\.[0-9]+') }}"
+  when: kubectl_version_output.rc == 0
+
+# kubelet 버전 파싱
+- name: "kubelet 버전 파싱"
+  set_fact:
+    k8s_kubelet_version: "{{ kubelet_version_output.stdout | regex_search('v[0-9]+\\.[0-9]+\\.[0-9]+') }}"
+  when: kubelet_version_output.rc == 0
+
+# kubeadm 버전 파싱
+- name: "kubeadm 버전 파싱"
+  set_fact:
+    k8s_kubeadm_version: "{{ kubeadm_version_output.stdout | regex_search('v[0-9]+\\.[0-9]+\\.[0-9]+') }}"
+  when: 
+    - k8s_enable_kubeadm
+    - kubeadm_version_output.rc == 0
+
+# 패키지 관리자를 통한 버전 확인 (yum)
+- name: "yum을 통한 설치된 패키지 버전 확인"
+  shell: "yum list installed | grep {{ item }} | awk '{print $2}' | head -1"
+  register: yum_k8s_versions
+  failed_when: false
+  changed_when: false
+  loop:
+    - kubelet
+    - kubeadm
+    - kubectl
+  when: 
+    - ansible_os_family == "RedHat"
+    - k8s_package_manager in ['auto', 'yum']
+
+# 패키지 관리자를 통한 버전 확인 (apt)
+- name: "apt를 통한 설치된 패키지 버전 확인"
+  shell: "dpkg -l | grep {{ item }} | awk '{print $3}' | head -1"
+  register: apt_k8s_versions
+  failed_when: false
+  changed_when: false
+  loop:
+    - kubelet
+    - kubeadm
+    - kubectl
+  when: 
+    - ansible_os_family == "Debian"
+    - k8s_package_manager in ['auto', 'apt']
+
+# 현재 버전 결정 로직
+- name: "현재 버전 결정 (kubectl 우선)"
+  set_fact:
+    k8s_current_version: "{{ k8s_kubectl_version }}"
+  when: 
+    - k8s_current_version == ""
+    - k8s_kubectl_version is defined
+    - k8s_kubectl_version != ""
+
+- name: "현재 버전 결정 (kubelet 대체)"
+  set_fact:
+    k8s_current_version: "{{ k8s_kubelet_version }}"
+  when: 
+    - k8s_current_version == ""
+    - k8s_kubelet_version is defined
+    - k8s_kubelet_version != ""
+
+- name: "현재 버전 결정 (kubeadm 대체)"
+  set_fact:
+    k8s_current_version: "{{ k8s_kubeadm_version }}"
+  when: 
+    - k8s_current_version == ""
+    - k8s_kubeadm_version is defined
+    - k8s_kubeadm_version != ""
+
+# 클러스터 버전 확인 (마스터 노드인 경우)
+- name: "클러스터 버전 확인"
+  command: kubectl version --short
+  register: cluster_version_output
+  failed_when: false
+  changed_when: false
+
+- name: "클러스터 서버 버전 파싱"
+  set_fact:
+    k8s_cluster_version: "{{ cluster_version_output.stdout_lines | select('match', '.*Server Version.*') | first | regex_search('v[0-9]+\\.[0-9]+\\.[0-9]+') }}"
+  when: 
+    - cluster_version_output.rc == 0
+    - cluster_version_output.stdout_lines is defined
+
+- name: "현재 버전 정보 표시"
+  debug:
+    msg:
+      - "감지된 Kubernetes 버전 정보:"
+      - "  kubectl: {{ k8s_kubectl_version | default('N/A') }}"
+      - "  kubelet: {{ k8s_kubelet_version | default('N/A') }}"
+      - "  kubeadm: {{ k8s_kubeadm_version | default('N/A') }}"
+      - "  클러스터: {{ k8s_cluster_version | default('N/A') }}"
+      - "  결정된 현재 버전: {{ k8s_current_version }}"
+
+- name: "버전 감지 실패 시 오류"
+  fail:
+    msg: "Kubernetes 버전을 감지할 수 없습니다. 수동으로 k8s_current_version을 설정하세요."
+  when: k8s_current_version == ""
+
+# 마이너 버전 추출
+- name: "현재 마이너 버전 추출"
+  set_fact:
+    k8s_current_minor_version: "{{ k8s_current_version | regex_replace('^v', '') | regex_replace('\\.[0-9]+$', '') }}"
+
+- name: "버전 호환성 확인"
+  debug:
+    msg: "현재 마이너 버전: {{ k8s_current_minor_version }}" 

@@ -1,0 +1,140 @@
+---
+# Kubernetes 버전 맵핑 (마이너 버전별 호환성)
+k8s_version_matrix:
+  "1.23":
+    next_version: "1.24"
+    supported_os:
+      - rocky-8
+      - centos-8
+      - ubuntu-18.04
+      - ubuntu-20.04
+    etcd_version: "3.5.1"
+    crio_version: "1.23.0"
+  "1.24":
+    next_version: "1.25"
+    supported_os:
+      - rocky-8
+      - centos-8
+      - ubuntu-18.04
+      - ubuntu-20.04
+      - ubuntu-22.04
+    etcd_version: "3.5.3"
+    crio_version: "1.24.0"
+  "1.25":
+    next_version: "1.26"
+    supported_os:
+      - rocky-8
+      - rocky-9
+      - centos-8
+      - centos-9
+      - ubuntu-20.04
+      - ubuntu-22.04
+    etcd_version: "3.5.4"
+    crio_version: "1.25.0"
+  "1.26":
+    next_version: "1.27"
+    supported_os:
+      - rocky-8
+      - rocky-9
+      - centos-8
+      - centos-9
+      - ubuntu-20.04
+      - ubuntu-22.04
+    etcd_version: "3.5.6"
+    crio_version: "1.26.0"
+  "1.27":
+    next_version: "1.28"
+    supported_os:
+      - rocky-8
+      - rocky-9
+      - centos-8
+      - centos-9
+      - ubuntu-20.04
+      - ubuntu-22.04
+    etcd_version: "3.5.7"
+    crio_version: "1.27.0"
+  "1.28":
+    next_version: "1.29"
+    supported_os:
+      - rocky-8
+      - rocky-9
+      - centos-8
+      - centos-9
+      - ubuntu-20.04
+      - ubuntu-22.04
+    etcd_version: "3.5.9"
+    crio_version: "1.28.0"
+
+# 바이너리 다운로드 URL 템플릿
+k8s_binary_base_url: "https://dl.k8s.io/release"
+k8s_binary_files:
+  - kubeadm
+  - kubelet
+  - kubectl
+
+# 시스템 서비스 파일 URL
+k8s_systemd_files:
+  kubelet_service: "https://raw.githubusercontent.com/kubernetes/release/v0.16.2/cmd/krel/templates/latest/kubelet/kubelet.service"
+  kubeadm_conf: "https://raw.githubusercontent.com/kubernetes/release/v0.16.2/cmd/krel/templates/latest/kubeadm/10-kubeadm.conf"
+
+# K8s 공식 repo 설정
+k8s_official_repo_config:
+  yum:
+    repo_name: "kubernetes"
+    repo_baseurl: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/rpm/"
+    gpg_key: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/rpm/repodata/repomd.xml.key"
+    packages:
+      - kubelet
+      - kubeadm  
+      - kubectl
+  apt:
+    repo_url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/deb/"
+    keyring_path: "/etc/apt/keyrings/kubernetes-apt-keyring.gpg"
+    packages:
+      - kubelet
+      - kubeadm
+      - kubectl
+
+# 레거시 패키지 매니저별 설정 (공식 repo에 없는 버전용)
+k8s_package_config:
+  yum:
+    repo_name: "kubernetes-legacy"
+    repo_baseurl: "https://packages.cloud.google.com/yum/repos/kubernetes-el7-x86_64"
+    gpg_key: "https://packages.cloud.google.com/yum/doc/yum-key.gpg"
+    packages:
+      - kubelet
+      - kubeadm
+      - kubectl
+  apt:
+    repo_url: "https://apt.kubernetes.io/"
+    keyring_path: "/etc/apt/keyrings/kubernetes-archive-keyring.gpg"
+    packages:
+      - kubelet
+      - kubeadm
+      - kubectl
+
+# K8s 공식 repo 최소 지원 버전 (동적으로 체크됨)
+k8s_official_repo_min_version: "1.28"
+k8s_official_repo_check_url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/rpm/repodata/repomd.xml"
+
+# 노드 역할 감지를 위한 파일 경로들
+k8s_master_indicators:
+  - "{{ k8s_config_dir }}/admin.conf"
+  - "{{ k8s_config_dir }}/controller-manager.conf"
+  - "{{ k8s_config_dir }}/scheduler.conf"
+  - "/var/lib/etcd"
+
+# 백업할 중요 파일들
+k8s_backup_files:
+  - "{{ k8s_config_dir }}"
+  - "/var/lib/etcd"
+  - "/var/lib/kubelet"
+  - "{{ k8s_bin_dir }}/kubeadm"
+  - "{{ k8s_bin_dir }}/kubelet"
+  - "{{ k8s_bin_dir }}/kubectl"
+
+# 상태 체크를 위한 명령어들
+k8s_health_checks:
+  node_ready: "kubectl get nodes --no-headers | grep -v Ready | wc -l"
+  pods_running: "kubectl get pods --all-namespaces --field-selector=status.phase!=Running --no-headers | wc -l"
+  api_server: "kubectl version --short" 
