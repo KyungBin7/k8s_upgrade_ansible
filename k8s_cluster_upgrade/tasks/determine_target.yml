@@ -34,15 +34,23 @@
     url: "{{ k8s_binary_base_url }}/stable-{{ k8s_next_version | default(k8s_target_version | regex_replace('^v', '') | regex_replace('\\.[0-9]+$', '')) }}.txt"
     method: GET
     timeout: 10
+    return_content: yes
   register: latest_patch_version
   ignore_errors: true
   when: network_check is not failed
+
+- name: "최신 패치 버전 응답 디버그"
+  debug:
+    var: latest_patch_version
+  when: latest_patch_version is defined
 
 - name: "최신 패치 버전으로 업데이트"
   set_fact:
     k8s_target_version: "{{ latest_patch_version.content.strip() }}"
   when:
+    - latest_patch_version is defined
     - latest_patch_version is succeeded
+    - latest_patch_version.content is defined
     - not k8s_force_version
     - k8s_target_version != ""
 

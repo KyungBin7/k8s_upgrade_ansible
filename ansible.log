@@ -843,3 +843,18 @@ This feature will be removed from community.general in version 13.0.0. Deprecati
 2025-06-27 10:58:45,199 p=95472 u=jangkyungbin n=ansible INFO| PLAY [Kubernetes 클러스터 업그레이드] **********************************************************************
 2025-06-27 10:58:47,242 p=95472 u=jangkyungbin n=ansible ERROR|  [ERROR]: User interrupted execution
 
+2025-06-27 11:01:21,246 p=95734 u=jangkyungbin n=ansible INFO| [DEPRECATION WARNING]: community.general.yaml has been deprecated. The plugin has been superseded by the 
+the option `result_format=yaml` in callback plugin ansible.builtin.default from ansible-core 2.13 onwards. 
+This feature will be removed from community.general in version 13.0.0. Deprecation warnings can be disabled
+ by setting deprecation_warnings=False in ansible.cfg.
+2025-06-27 11:01:21,269 p=95734 u=jangkyungbin n=ansible INFO| PLAY [Kubernetes 클러스터 업그레이드] **********************************************************************
+2025-06-27 11:01:24,422 p=95734 u=jangkyungbin n=ansible ERROR|  [ERROR]: User interrupted execution
+
+2025-06-27 11:05:22,822 p=95991 u=jangkyungbin n=ansible INFO| Using /Users/jangkyungbin/private/metanet/k8s/ansible/cluster_upgrade/ansible.cfg as config file
+2025-06-27 11:05:23,039 p=95991 u=jangkyungbin n=ansible INFO| [DEPRECATION WARNING]: community.general.yaml has been deprecated. The plugin has been superseded by the 
+the option `result_format=yaml` in callback plugin ansible.builtin.default from ansible-core 2.13 onwards. 
+This feature will be removed from community.general in version 13.0.0. Deprecation warnings can be disabled
+ by setting deprecation_warnings=False in ansible.cfg.
+2025-06-27 11:05:23,062 p=95991 u=jangkyungbin n=ansible INFO| PLAY [Kubernetes 클러스터 업그레이드] **********************************************************************
+2025-06-27 11:05:24,429 p=95991 u=jangkyungbin n=ansible ERROR|  [ERROR]: User interrupted execution
+
