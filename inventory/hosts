@@ -3,15 +3,15 @@
 
 [k8s_masters]
 # 컨트롤 플레인 노드들 (마스터)
-master1 ansible_host=192.168.1.10 ansible_user=rocky
-master2 ansible_host=192.168.1.11 ansible_user=rocky
-master3 ansible_host=192.168.1.12 ansible_user=rocky
+master1 ansible_host=10.40.151.121 ansible_user=root
+master2 ansible_host=10.40.151.122 ansible_user=root
+master3 ansible_host=10.40.151.123 ansible_user=root
 
 [k8s_workers]
 # 워커 노드들
-worker1 ansible_host=192.168.1.20 ansible_user=rocky
-worker2 ansible_host=192.168.1.21 ansible_user=rocky
-worker3 ansible_host=192.168.1.22 ansible_user=rocky
+worker1 ansible_host=10.40.151.131 ansible_user=root
+worker2 ansible_host=10.40.151.132 ansible_user=root
+
 
 [k8s_cluster:children]
 k8s_masters
