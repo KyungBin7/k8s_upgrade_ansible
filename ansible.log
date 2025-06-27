@@ -442,3 +442,45 @@ undefined group: k8s_cluster
 community.general in version 13.0.0. Deprecation warnings can be disabled by setting deprecation_warnings=False in ansible.cfg.
 2025-06-27 10:22:46,358 p=91312 u=jangkyungbin n=ansible INFO| PLAY [Ansible Ad-Hoc] ****************************************************************************************************************
 2025-06-27 10:22:46,362 p=91312 u=jangkyungbin n=ansible INFO| PLAY RECAP ***************************************************************************************************************************
+2025-06-27 10:26:42,301 p=92096 u=jangkyungbin n=ansible INFO| [DEPRECATION WARNING]: community.general.yaml has been deprecated. The plugin has been superseded by the 
+the option `result_format=yaml` in callback plugin ansible.builtin.default from ansible-core 2.13 onwards. 
+This feature will be removed from community.general in version 13.0.0. Deprecation warnings can be disabled
+ by setting deprecation_warnings=False in ansible.cfg.
+2025-06-27 10:26:42,343 p=92096 u=jangkyungbin n=ansible INFO| PLAY [Ansible Ad-Hoc] **************************************************************************************
+2025-06-27 10:26:47,199 p=92096 u=jangkyungbin n=ansible INFO| TASK [ping] ************************************************************************************************
+2025-06-27 10:26:47,200 p=92096 u=jangkyungbin n=ansible INFO| fatal: [master1]: UNREACHABLE! => changed=false 
+  msg: |-
+    Data could not be sent to remote host "10.40.151.121". Make sure this host can be reached over ssh: Warning: Permanently added '10.40.151.121' (ED25519) to the list of known hosts.
+    no such identity: /Users/jangkyungbin/.ssh/id_rsa: No such file or directory
+    root@10.40.151.121: Permission denied (publickey,gssapi-keyex,gssapi-with-mic,password).
+  unreachable: true
+2025-06-27 10:26:47,212 p=92096 u=jangkyungbin n=ansible INFO| fatal: [master3]: UNREACHABLE! => changed=false 
+  msg: |-
+    Data could not be sent to remote host "10.40.151.123". Make sure this host can be reached over ssh: Warning: Permanently added '10.40.151.123' (ED25519) to the list of known hosts.
+    no such identity: /Users/jangkyungbin/.ssh/id_rsa: No such file or directory
+    root@10.40.151.123: Permission denied (publickey,gssapi-keyex,gssapi-with-mic,password).
+  unreachable: true
+2025-06-27 10:26:47,251 p=92096 u=jangkyungbin n=ansible INFO| fatal: [worker2]: UNREACHABLE! => changed=false 
+  msg: |-
+    Data could not be sent to remote host "10.40.151.132". Make sure this host can be reached over ssh: Warning: Permanently added '10.40.151.132' (ED25519) to the list of known hosts.
+    no such identity: /Users/jangkyungbin/.ssh/id_rsa: No such file or directory
+    root@10.40.151.132: Permission denied (publickey,gssapi-keyex,gssapi-with-mic,password).
+  unreachable: true
+2025-06-27 10:26:47,420 p=92096 u=jangkyungbin n=ansible INFO| fatal: [worker1]: UNREACHABLE! => changed=false 
+  msg: |-
+    Data could not be sent to remote host "10.40.151.131". Make sure this host can be reached over ssh: Warning: Permanently added '10.40.151.131' (ED25519) to the list of known hosts.
+    no such identity: /Users/jangkyungbin/.ssh/id_rsa: No such file or directory
+    root@10.40.151.131: Permission denied (publickey,gssapi-keyex,gssapi-with-mic,password).
+  unreachable: true
+2025-06-27 10:26:47,432 p=92096 u=jangkyungbin n=ansible INFO| fatal: [master2]: UNREACHABLE! => changed=false 
+  msg: |-
+    Data could not be sent to remote host "10.40.151.122". Make sure this host can be reached over ssh: Warning: Permanently added '10.40.151.122' (ED25519) to the list of known hosts.
+    no such identity: /Users/jangkyungbin/.ssh/id_rsa: No such file or directory
+    root@10.40.151.122: Permission denied (publickey,gssapi-keyex,gssapi-with-mic,password).
+  unreachable: true
+2025-06-27 10:26:47,433 p=92096 u=jangkyungbin n=ansible INFO| PLAY RECAP *************************************************************************************************
+2025-06-27 10:26:47,433 p=92096 u=jangkyungbin n=ansible INFO| master1                    : ok=0    changed=0    unreachable=1    failed=0    skipped=0    rescued=0    ignored=0   
+2025-06-27 10:26:47,433 p=92096 u=jangkyungbin n=ansible INFO| master2                    : ok=0    changed=0    unreachable=1    failed=0    skipped=0    rescued=0    ignored=0   
+2025-06-27 10:26:47,434 p=92096 u=jangkyungbin n=ansible INFO| master3                    : ok=0    changed=0    unreachable=1    failed=0    skipped=0    rescued=0    ignored=0   
+2025-06-27 10:26:47,434 p=92096 u=jangkyungbin n=ansible INFO| worker1                    : ok=0    changed=0    unreachable=1    failed=0    skipped=0    rescued=0    ignored=0   
+2025-06-27 10:26:47,434 p=92096 u=jangkyungbin n=ansible INFO| worker2                    : ok=0    changed=0    unreachable=1    failed=0    skipped=0    rescued=0    ignored=0   

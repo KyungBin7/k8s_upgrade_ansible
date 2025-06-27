@@ -1,0 +1,86 @@
+# Ansible 관련 파일
+*.log
+ansible.log
+*.retry
+.ansible/
+__pycache__/
+*.pyc
+*.pyo
+.cache/
+.pytest_cache/
+
+# SSH 키 및 보안 관련 파일
+*.pem
+*.key
+id_rsa*
+id_ed25519*
+*.pub
+.vault_pass
+vault_password_file
+secrets.yml
+passwords.yml
+
+# 백업 파일
+*.bak
+*.backup
+*~
+*.orig
+*.swp
+*.swo
+.DS_Store
+
+# 임시 파일
+tmp/
+temp/
+*.tmp
+*.temp
+
+# IDE 및 에디터 파일
+.vscode/
+.idea/
+*.sublime-*
+.vim/
+*.vim
+.netrwhist
+
+# OS 관련 파일
+Thumbs.db
+.DS_Store
+*.log
+
+# 환경별 설정 파일 (민감한 정보 포함 가능)
+*_local.yml
+*_production.yml
+*_staging.yml
+.env
+.env.local
+
+# 다운로드된 역할들
+roles/external/
+galaxy_roles/
+
+# 테스트 결과
+test_results/
+junit/
+coverage/
+
+# 문서 빌드 결과
+docs/_build/
+site/
+
+# 패키지 관리
+requirements.txt.lock
+
+# 실행 중 생성되는 파일들
+*.pid
+*.sock
+*.lock
+
+# 클러스터별 개인 설정
+inventory/production
+inventory/staging
+inventory/local
+group_vars/local/
+host_vars/local/ 
+
+ansible.log
