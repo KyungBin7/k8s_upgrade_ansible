@@ -91,17 +91,30 @@
     timeout: 60
   when: "'kubelet' in k8s_binaries_to_install"
 
-- name: "kubelet systemd 서비스 파일 업데이트"
-  template:
-    src: "/tmp/kubelet.service"
+- name: "kubelet systemd 서비스 파일 경로 수정"
+  shell: |
+    cp /tmp/kubelet.service /tmp/kubelet.service.tmp
+    sed -i 's|/usr/bin/|{{ k8s_bin_dir }}/|g' /tmp/kubelet.service.tmp
+  when: "'kubelet' in k8s_binaries_to_install"
+
+- name: "kubelet systemd 서비스 파일 설치"
+  copy:
+    src: "/tmp/kubelet.service.tmp"
     dest: "/etc/systemd/system/kubelet.service"
+    remote_src: true
     backup: yes
-  vars:
-    k8s_bin_path: "{{ k8s_bin_dir }}"
+    mode: '0644'
   when: "'kubelet' in k8s_binaries_to_install"
   notify:
     - reload systemd
     - restart kubelet
+
+- name: "kubeadm 설정 디렉토리 생성"
+  file:
+    path: "/etc/systemd/system/kubelet.service.d"
+    state: directory
+    mode: '0755'
+  when: "'kubelet' in k8s_binaries_to_install"
 
 - name: "kubeadm 설정 파일 다운로드"
   get_url:
@@ -110,13 +123,19 @@
     timeout: 60
   when: "'kubelet' in k8s_binaries_to_install"
 
-- name: "kubeadm 설정 파일 업데이트"
-  template:
-    src: "/tmp/10-kubeadm.conf"
+- name: "kubeadm 설정 파일 경로 수정"
+  shell: |
+    cp /tmp/10-kubeadm.conf /tmp/10-kubeadm.conf.tmp
+    sed -i 's|/usr/bin/|{{ k8s_bin_dir }}/|g' /tmp/10-kubeadm.conf.tmp
+  when: "'kubelet' in k8s_binaries_to_install"
+
+- name: "kubeadm 설정 파일 설치"
+  copy:
+    src: "/tmp/10-kubeadm.conf.tmp"
     dest: "/etc/systemd/system/kubelet.service.d/10-kubeadm.conf"
+    remote_src: true
     backup: yes
-  vars:
-    k8s_bin_path: "{{ k8s_bin_dir }}"
+    mode: '0644'
   when: "'kubelet' in k8s_binaries_to_install"
   notify:
     - reload systemd
