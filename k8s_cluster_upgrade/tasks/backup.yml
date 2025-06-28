@@ -50,6 +50,17 @@
     - item | basename != "etcd" or k8s_detected_role == "master"
   ignore_errors: true
 
+# 백업 서브 디렉토리 생성
+- name: "백업 서브 디렉토리 생성"
+  file:
+    path: "{{ k8s_current_backup_dir }}/{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - binaries
+    - systemd
+    - cluster-state
+
 # 바이너리 파일 백업
 - name: "현재 Kubernetes 바이너리 백업"
   copy:
