@@ -5,6 +5,11 @@
   debug:
     msg: "CRI-O 컨테이너 런타임 업그레이드를 시작합니다"
 
+# 초기 변수 설정
+- name: "CRI-O 업그레이드 변수 초기화"
+  set_fact:
+    crio_needs_upgrade: false
+
 # 현재 CRI-O 버전 확인
 - name: "현재 CRI-O 버전 확인"
   shell: |
@@ -34,6 +39,50 @@
   debug:
     msg: "CRI-O 목표 버전: {{ crio_target_version | default('N/A') }}"
 
+# OpenSUSE 저장소에서 실제 사용 가능한 CRI-O 버전 확인
+- name: "OpenSUSE 저장소에서 사용 가능한 CRI-O 패키지 목록 확인"
+  uri:
+    url: "{{ k8s_opensuse_crio_base_url }}:/{{ crio_minor_version }}:/{{ k8s_opensuse_os_version }}/x86_64/"
+    method: GET
+    status_code: [200, 404]
+  register: opensuse_package_list_check
+  when: 
+    - crio_target_version is defined
+    - crio_minor_version is defined
+    - crio_opensuse_available | default(false)
+  ignore_errors: true
+
+- name: "실제 사용 가능한 최신 CRI-O 버전 추출"
+  set_fact:
+    crio_actual_version: "{{ opensuse_package_list_check.content | default('') | regex_findall('cri-o-(' + crio_minor_version + '\\.[0-9]+)[^\"]*\\.rpm') | sort | last }}"
+  when: 
+    - crio_target_version is defined
+    - opensuse_package_list_check is defined
+    - opensuse_package_list_check.status == 200
+    - opensuse_package_list_check.content is defined
+
+- name: "실제 CRI-O 목표 버전 설정"
+  set_fact:
+    crio_target_version: "{{ crio_actual_version }}"
+  when: 
+    - crio_actual_version is defined
+    - crio_actual_version != ""
+
+- name: "최종 CRI-O 목표 버전 표시"
+  debug:
+    msg: 
+      - "CRI-O 마이너 버전: {{ crio_minor_version | default('N/A') }}"
+      - "실제 사용 가능한 CRI-O 버전: {{ crio_target_version | default('N/A') }}"
+
+# 버전 비교 및 업그레이드 필요 여부 확인
+- name: "CRI-O 업그레이드 필요 여부 확인"
+  set_fact:
+    crio_needs_upgrade: "{{ crio_current_version.stdout != crio_target_version and crio_target_version is defined and crio_target_version != 'N/A' and crio_target_version != '' }}"
+
+- name: "CRI-O 업그레이드 스킵"
+  debug:
+    msg: "CRI-O 업그레이드가 필요하지 않습니다 (현재: {{ crio_current_version.stdout }}, 목표: {{ crio_target_version | default('N/A') }})"
+  when: not crio_needs_upgrade
 
 # CRI-O 저장소 확인 변수 초기화
 - name: "CRI-O 저장소 확인 변수 초기화"
@@ -82,7 +131,7 @@
 - name: "CRI-O 저장소 상태 디버그"
   debug:
     msg:
-      - "CRI-O 업그레이드 필요: {{ crio_needs_upgrade | default(false) }}"
+      - "CRI-O 업그레이드 필요: {{ crio_needs_upgrade }}"
       - "현재 CRI-O 버전: {{ crio_current_version.stdout | default('unknown') }}"
       - "목표 CRI-O 버전: {{ crio_target_version | default('N/A') }}"
       - "CRI-O 마이너 버전: {{ crio_minor_version | default('N/A') }}"

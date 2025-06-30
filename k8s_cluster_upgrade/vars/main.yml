@@ -9,7 +9,9 @@ k8s_version_matrix:
       - ubuntu-18.04
       - ubuntu-20.04
     etcd_version: "3.5.1"
-    crio_version: "1.23.0"
+    crio_version: "1.23"
+    crio_minor_version: "1.23"
+    opensuse_available: true
   "1.24":
     next_version: "1.25"
     supported_os:
@@ -19,7 +21,9 @@ k8s_version_matrix:
       - ubuntu-20.04
       - ubuntu-22.04
     etcd_version: "3.5.3"
-    crio_version: "1.24.0"
+    crio_version: "1.24"
+    crio_minor_version: "1.24"
+    opensuse_available: true
   "1.25":
     next_version: "1.26"
     supported_os:
@@ -30,7 +34,9 @@ k8s_version_matrix:
       - ubuntu-20.04
       - ubuntu-22.04
     etcd_version: "3.5.4"
-    crio_version: "1.25.0"
+    crio_version: "1.25"
+    crio_minor_version: "1.25"
+    opensuse_available: true
   "1.26":
     next_version: "1.27"
     supported_os:
@@ -41,7 +47,9 @@ k8s_version_matrix:
       - ubuntu-20.04
       - ubuntu-22.04
     etcd_version: "3.5.6"
-    crio_version: "1.26.0"
+    crio_version: "1.26"
+    crio_minor_version: "1.26"
+    opensuse_available: true
   "1.27":
     next_version: "1.28"
     supported_os:
@@ -52,7 +60,9 @@ k8s_version_matrix:
       - ubuntu-20.04
       - ubuntu-22.04
     etcd_version: "3.5.7"
-    crio_version: "1.27.0"
+    crio_version: "1.27"
+    crio_minor_version: "1.27"
+    opensuse_available: true
   "1.28":
     next_version: "1.29"
     supported_os:
@@ -63,7 +73,9 @@ k8s_version_matrix:
       - ubuntu-20.04
       - ubuntu-22.04
     etcd_version: "3.5.9"
-    crio_version: "1.28.0"
+    crio_version: "1.28"
+    crio_minor_version: "1.28"
+    opensuse_available: true
 
 # 바이너리 다운로드 URL 템플릿
 k8s_binary_base_url: "https://dl.k8s.io/release"
@@ -137,4 +149,8 @@ k8s_backup_files:
 k8s_health_checks:
   node_ready: "kubectl get nodes --no-headers | grep -v Ready | wc -l"
   pods_running: "kubectl get pods --all-namespaces --field-selector=status.phase!=Running --no-headers | wc -l"
-  api_server: "kubectl version --short" 
+  api_server: "kubectl version --short"
+
+# CRI-O 저장소 설정
+k8s_opensuse_crio_base_url: "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o"
+k8s_opensuse_os_version: "CentOS_8" 
