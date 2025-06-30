@@ -37,18 +37,56 @@
     - k8s_detected_role == "master"
     - k8s_is_first_master | default(false)
 
-# 설정 파일 백업
-- name: "Kubernetes 설정 파일 백업"
-  synchronize:
-    src: "{{ item }}"
-    dest: "{{ k8s_current_backup_dir }}/"
-    delete: false
-    recursive: true
-  delegate_to: "{{ inventory_hostname }}"
+# 설정 파일 존재 여부 확인
+- name: "백업할 파일/디렉토리 존재 확인"
+  stat:
+    path: "{{ item }}"
+  register: backup_files_stat
   loop: "{{ k8s_backup_files }}"
   when: 
     - item | basename != "etcd" or k8s_detected_role == "master"
+
+# 디렉토리 백업 (archive를 사용하여 tar로 압축)
+- name: "Kubernetes 디렉토리 백업 (압축)"
+  archive:
+    path: "{{ item.item }}"
+    dest: "{{ k8s_current_backup_dir }}/{{ item.item | basename }}.tar.gz"
+    format: gz
+  loop: "{{ backup_files_stat.results }}"
+  when: 
+    - item.stat is defined
+    - item.stat.exists
+    - item.stat.isdir
+  loop_control:
+    label: "{{ item.item }}"
   ignore_errors: true
+
+# 파일 백업 (copy 모듈 사용)
+- name: "Kubernetes 파일 백업"
+  copy:
+    src: "{{ item.item }}"
+    dest: "{{ k8s_current_backup_dir }}/{{ item.item | basename }}"
+    remote_src: true
+    mode: preserve
+  loop: "{{ backup_files_stat.results }}"
+  when: 
+    - item.stat is defined
+    - item.stat.exists
+    - item.stat.isreg
+  loop_control:
+    label: "{{ item.item }}"
+  ignore_errors: true
+
+# 백업 결과 로그
+- name: "백업 완료된 항목 확인"
+  debug:
+    msg: "백업 완료: {{ item.item }} ({{ 'Directory' if item.stat.isdir else 'File' }})"
+  loop: "{{ backup_files_stat.results }}"
+  when: 
+    - item.stat is defined
+    - item.stat.exists
+  loop_control:
+    label: "{{ item.item }}"
 
 # 백업 서브 디렉토리 생성
 - name: "백업 서브 디렉토리 생성"
