@@ -12,7 +12,7 @@
 
 # kubeadm 업그레이드
 - name: "kubeadm 업그레이드 (패키지 방식)"
-  include_tasks: install_packages.yml
+  include_tasks: 20_install_packages.yml
   vars:
     k8s_packages_to_install:
       - "kubeadm={{ k8s_target_version | regex_replace('^v', '') }}-*"
@@ -21,7 +21,7 @@
     - k8s_detected_package_manager in ['yum', 'apt']
 
 - name: "kubeadm 업그레이드 (바이너리 방식)"
-  include_tasks: install_binaries.yml
+  include_tasks: 21_install_binaries.yml
   vars:
     k8s_binaries_to_install:
       - kubeadm
@@ -85,7 +85,7 @@
 
 # kubelet 및 kubectl 업그레이드
 - name: "kubelet 및 kubectl 업그레이드 (패키지 방식)"
-  include_tasks: install_packages.yml
+  include_tasks: 20_install_packages.yml
   vars:
     k8s_packages_to_install:
       - "kubelet={{ k8s_target_version | regex_replace('^v', '') }}-*"
@@ -95,7 +95,7 @@
     - k8s_detected_package_manager in ['yum', 'apt']
 
 - name: "kubelet 및 kubectl 업그레이드 (바이너리 방식)"
-  include_tasks: install_binaries.yml
+  include_tasks: 21_install_binaries.yml
   vars:
     k8s_binaries_to_install:
       - kubelet

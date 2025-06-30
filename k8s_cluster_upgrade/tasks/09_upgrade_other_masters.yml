@@ -36,11 +36,11 @@
 
 # kubeadm, kubelet, kubectl 업그레이드
 - name: "패키지 관리자를 통한 업그레이드"
-  include_tasks: install_packages.yml
+  include_tasks: 20_install_packages.yml
   when: k8s_detected_package_manager != 'binary'
 
 - name: "바이너리를 통한 업그레이드"
-  include_tasks: install_binaries.yml
+  include_tasks: 21_install_binaries.yml
   when: k8s_detected_package_manager == 'binary'
 
 # kubeadm 업그레이드

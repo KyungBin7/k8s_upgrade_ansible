@@ -5,58 +5,58 @@
   debug:
     msg: "Kubernetes 클러스터 업그레이드를 시작합니다"
 
-# 1. 사전 검사 및 환경 준비
-- name: "사전 검사 수행"
-  include_tasks: preflight.yml
+# 01. 사전 검사 및 환경 준비
+- name: "01. 사전 검사 수행"
+  include_tasks: 01_preflight.yml
   tags:
     - preflight
     - always
 
-# 2. 현재 버전 감지
-- name: "현재 Kubernetes 버전 감지"
-  include_tasks: detect_version.yml
+# 02. 현재 버전 감지
+- name: "02. 현재 Kubernetes 버전 감지"
+  include_tasks: 02_detect_version.yml
   tags:
     - detect
     - always
 
-# 3. 목표 버전 결정
-- name: "목표 버전 결정"
-  include_tasks: determine_target.yml
+# 03. 목표 버전 결정
+- name: "03. 목표 버전 결정"
+  include_tasks: 03_determine_target.yml
   tags:
     - target
     - always
 
-# 4. 노드 역할 감지
-- name: "노드 역할 감지"
-  include_tasks: detect_role.yml
+# 04. 노드 역할 감지
+- name: "04. 노드 역할 감지"
+  include_tasks: 04_detect_role.yml
   tags:
     - role
     - always
 
-# 5. 패키지 관리자 감지
-- name: "패키지 관리자 감지"
-  include_tasks: detect_package_manager.yml
+# 05. 패키지 관리자 감지
+- name: "05. 패키지 관리자 감지"
+  include_tasks: 05_detect_package_manager.yml
   tags:
     - package
     - always
 
-# 6. 공식 repo 버전 체크
-- name: "공식 repo 버전 체크"
-  include_tasks: check_official_repo.yml
+# 06. 공식 repo 버전 체크
+- name: "06. 공식 repo 버전 체크"
+  include_tasks: 06_check_official_repo.yml
   tags:
     - repo-check
     - always
 
-# 7. 백업 수행
-- name: "백업 수행"
-  include_tasks: backup.yml
+# 07. 백업 수행
+- name: "07. 백업 수행"
+  include_tasks: 07_backup.yml
   when: k8s_backup_enabled
   tags:
     - backup
 
-# 8. 마스터 노드 업그레이드 (control_plane 단계에서만)
-- name: "첫 번째 컨트롤 플레인 업그레이드"
-  include_tasks: upgrade_control_plane.yml
+# 08. 마스터 노드 업그레이드 (control_plane 단계에서만)
+- name: "08. 첫 번째 컨트롤 플레인 업그레이드"
+  include_tasks: 08_upgrade_control_plane.yml
   when: 
     - k8s_upgrade_phase | default('') == 'control_plane'
     - k8s_detected_role == 'master'
@@ -65,8 +65,9 @@
     - control-plane
     - master
 
-- name: "추가 컨트롤 플레인 노드 업그레이드"
-  include_tasks: upgrade_other_masters.yml
+# 09. 추가 마스터 노드 업그레이드
+- name: "09. 추가 컨트롤 플레인 노드 업그레이드"
+  include_tasks: 09_upgrade_other_masters.yml
   when: 
     - k8s_upgrade_phase | default('') == 'control_plane'
     - k8s_detected_role == 'master'
@@ -75,9 +76,9 @@
     - control-plane
     - other-masters
 
-# 9. 워커 노드 업그레이드 (worker 단계에서만)
-- name: "워커 노드 업그레이드"
-  include_tasks: upgrade_worker.yml
+# 10. 워커 노드 업그레이드 (worker 단계에서만)
+- name: "10. 워커 노드 업그레이드"
+  include_tasks: 10_upgrade_worker.yml
   when: 
     - k8s_upgrade_phase | default('') == 'worker'
     - k8s_detected_role == 'worker'
@@ -85,16 +86,16 @@
     - worker
 
 # 11. 업그레이드 후 검증
-- name: "업그레이드 검증"
-  include_tasks: verify.yml
+- name: "11. 업그레이드 검증"
+  include_tasks: 11_verify.yml
   when: k8s_verify_upgrade
   tags:
     - verify
     - always
 
 # 12. 정리 작업
-- name: "정리 작업"
-  include_tasks: cleanup.yml
+- name: "12. 정리 작업"
+  include_tasks: 12_cleanup.yml
   tags:
     - cleanup
     - always
