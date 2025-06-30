@@ -40,6 +40,12 @@
     msg: "CRI-O 업그레이드가 필요하지 않습니다 (현재: {{ crio_current_version.stdout }}, 목표: {{ crio_target_version | default('N/A') }})"
   when: not crio_needs_upgrade
 
+# CRI-O 저장소 확인 변수 초기화
+- name: "CRI-O 저장소 확인 변수 초기화"
+  set_fact:
+    crio_available_in_repo: false
+  when: crio_needs_upgrade
+
 # 공식 저장소에서 CRI-O 버전 확인
 - name: "공식 저장소에서 CRI-O 버전 확인 (Rocky/RHEL)"
   shell: |
@@ -70,10 +76,22 @@
 # 공식 저장소 사용 가능 여부 확인
 - name: "공식 저장소 CRI-O 버전 사용 가능성 확인"
   set_fact:
-    crio_available_in_repo: "{{ crio_repo_check.stdout != 'not_available' and 'not_available' not in crio_repo_check.stdout }}"
+    crio_available_in_repo: true
   when: 
     - crio_needs_upgrade
     - crio_repo_check is defined
+    - crio_repo_check.stdout is defined
+    - crio_repo_check.stdout != 'not_available'
+    - "'not_available' not in crio_repo_check.stdout"
+
+- name: "CRI-O 저장소 상태 디버그"
+  debug:
+    msg:
+      - "CRI-O 업그레이드 필요: {{ crio_needs_upgrade | default(false) }}"
+      - "패키지 관리자: {{ k8s_detected_package_manager | default('unknown') }}"
+      - "공식 저장소 사용 가능: {{ crio_available_in_repo | default(false) }}"
+      - "저장소 확인 결과: {{ crio_repo_check.stdout | default('확인되지 않음') }}"
+  when: crio_needs_upgrade
 
 # CRI-O 서비스 중지
 - name: "CRI-O 서비스 중지"
