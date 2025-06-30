@@ -1,0 +1,133 @@
+---
+# Kubernetes 서비스 재시작
+
+- name: "서비스 재시작 시작"
+  debug:
+    msg: "Kubernetes 서비스를 재시작합니다"
+
+# systemd 데몬 리로드
+- name: "systemd 데몬 리로드"
+  systemd:
+    daemon_reload: true
+
+# 컨테이너 런타임 재시작 (우선순위)
+- name: "컨테이너 런타임 상태 확인"
+  systemd:
+    name: "{{ item }}"
+  register: runtime_status
+  loop: "{{ k8s_service_restart_order.container_runtime }}"
+  ignore_errors: true
+
+- name: "컨테이너 런타임 재시작"
+  systemd:
+    name: "{{ item.item }}"
+    state: restarted
+    enabled: true
+  loop: "{{ runtime_status.results }}"
+  when: 
+    - item.status is defined
+    - item.status.ActiveState is defined
+  loop_control:
+    label: "{{ item.item }}"
+  ignore_errors: true
+
+# kubelet 서비스 재시작
+- name: "kubelet 서비스 재시작"
+  systemd:
+    name: kubelet
+    state: restarted
+    enabled: true
+  register: kubelet_restart_result
+
+- name: "kubelet 재시작 결과"
+  debug:
+    msg: "kubelet 서비스 재시작 {{ '성공' if kubelet_restart_result.changed else '실패' }}"
+
+# kubelet 서비스 상태 확인
+- name: "kubelet 서비스 상태 확인"
+  systemd:
+    name: kubelet
+  register: kubelet_status
+
+- name: "kubelet 서비스 상태"
+  debug:
+    msg:
+      - "kubelet 상태: {{ kubelet_status.status.ActiveState }}"
+      - "서브 상태: {{ kubelet_status.status.SubState }}"
+
+# 마스터 노드인 경우 etcd 및 컨트롤 플레인 재시작 대기
+- name: "컨트롤 플레인 파드 재시작 대기"
+  shell: |
+    kubectl get pods -n kube-system -l tier=control-plane --field-selector spec.nodeName={{ ansible_hostname }} -o jsonpath='{.items[*].status.phase}'
+  register: control_plane_status
+  until: control_plane_status.stdout.find('Running') != -1 or control_plane_status.rc != 0
+  retries: "{{ k8s_health_check_retries }}"
+  delay: "{{ k8s_health_check_delay }}"
+  when: k8s_detected_role == "master"
+  ignore_errors: true
+
+# 노드 Ready 상태 확인
+- name: "노드 Ready 상태 대기"
+  shell: |
+    kubectl get node {{ ansible_hostname }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "False"
+  register: node_ready_status
+  until: node_ready_status.stdout == "True"
+  retries: "{{ k8s_health_check_retries }}"
+  delay: "{{ k8s_health_check_delay }}"
+  when: k8s_detected_role in ["master", "worker"]
+  ignore_errors: true
+
+# 파드 상태 확인 (워커 노드)
+- name: "노드의 파드 상태 확인"
+  shell: |
+    kubectl get pods --all-namespaces --field-selector spec.nodeName={{ ansible_hostname }} -o jsonpath='{.items[*].status.phase}' 2>/dev/null || echo ""
+  register: pods_status
+  when: k8s_detected_role == "worker"
+  ignore_errors: true
+
+- name: "파드 상태 결과"
+  debug:
+    msg: "노드 {{ ansible_hostname }}의 파드 상태: {{ pods_status.stdout }}"
+  when: 
+    - k8s_detected_role == "worker"
+    - pods_status is defined
+
+# 네트워킹 서비스 재시작 (필요시)
+- name: "네트워킹 서비스 재시작"
+  systemd:
+    name: "{{ item }}"
+    state: restarted
+  loop: "{{ k8s_service_restart_order.networking }}"
+  when: k8s_restart_networking_services | default(false)
+  ignore_errors: true
+
+# 서비스 재시작 완료 대기
+- name: "서비스 안정화 대기"
+  pause:
+    seconds: "{{ k8s_service_stabilization_delay }}"
+
+# 최종 서비스 상태 확인
+- name: "주요 서비스 상태 확인"
+  systemd:
+    name: "{{ item }}"
+  register: final_service_status
+  loop:
+    - kubelet
+    - "{{ k8s_container_runtime }}"
+  ignore_errors: true
+
+- name: "서비스 상태 결과"
+  debug:
+    msg:
+      - "서비스: {{ item.item }}"
+      - "상태: {{ item.status.ActiveState if item.status is defined else 'Unknown' }}"
+      - "활성화: {{ item.status.UnitFileState if item.status is defined else 'Unknown' }}"
+  loop: "{{ final_service_status.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+- name: "서비스 재시작 완료"
+  debug:
+    msg: 
+      - "Kubernetes 서비스 재시작이 완료되었습니다"
+      - "노드 상태: {{ node_ready_status.stdout if node_ready_status is defined else 'Unknown' }}" 

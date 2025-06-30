@@ -1,0 +1,68 @@
+---
+# 롤백 전 현재 상태 백업
+
+- name: "현재 상태 백업 시작"
+  debug:
+    msg: "롤백 전 현재 클러스터 상태를 백업합니다"
+
+# 현재 상태 백업 디렉토리 생성
+- name: "현재 상태 백업 디렉토리 생성"
+  file:
+    path: "{{ k8s_backup_dir }}/pre-rollback-{{ ansible_date_time.epoch }}"
+    state: directory
+    mode: '0755'
+  register: current_backup_dir
+
+- name: "현재 상태 백업 경로 설정"
+  set_fact:
+    k8s_current_state_backup_dir: "{{ current_backup_dir.path }}"
+
+# 현재 Kubernetes 버전 정보 저장
+- name: "현재 버전 정보 백업"
+  shell: |
+    kubelet --version > {{ k8s_current_state_backup_dir }}/current-kubelet-version.txt 2>/dev/null || echo "N/A"
+    kubeadm version > {{ k8s_current_state_backup_dir }}/current-kubeadm-version.txt 2>/dev/null || echo "N/A"
+    kubectl version --client > {{ k8s_current_state_backup_dir }}/current-kubectl-version.txt 2>/dev/null || echo "N/A"
+  ignore_errors: true
+
+# 현재 클러스터 상태 백업 (마스터 노드에서만)
+- name: "현재 클러스터 상태 백업"
+  shell: "{{ item.command }}"
+  register: current_cluster_state
+  failed_when: false
+  loop:
+    - { command: "kubectl get nodes -o yaml", file: "current-nodes.yaml" }
+    - { command: "kubectl get pods --all-namespaces -o yaml", file: "current-pods.yaml" }
+    - { command: "kubectl get services --all-namespaces -o yaml", file: "current-services.yaml" }
+    - { command: "kubectl version", file: "current-cluster-version.txt" }
+  when: k8s_detected_role == "master"
+  ignore_errors: true
+
+- name: "클러스터 상태 파일 저장"
+  copy:
+    content: "{{ item.stdout }}"
+    dest: "{{ k8s_current_state_backup_dir }}/{{ item.item.file }}"
+  loop: "{{ current_cluster_state.results }}"
+  when: 
+    - k8s_detected_role == "master"
+    - item.rc == 0
+  loop_control:
+    label: "{{ item.item.file }}"
+  ignore_errors: true
+
+# 현재 설정 파일 백업
+- name: "현재 설정 파일 백업"
+  copy:
+    src: "{{ item }}"
+    dest: "{{ k8s_current_state_backup_dir }}/"
+    remote_src: true
+    mode: preserve
+  loop: "{{ k8s_restore_files }}"
+  ignore_errors: true
+
+# 백업 완료 로그
+- name: "현재 상태 백업 완료"
+  debug:
+    msg: 
+      - "현재 상태 백업이 완료되었습니다"
+      - "백업 위치: {{ k8s_current_state_backup_dir }}" 

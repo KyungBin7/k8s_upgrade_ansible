@@ -1,0 +1,212 @@
+---
+# 롤백 완료 후 정리 작업
+
+- name: "정리 작업 시작"
+  debug:
+    msg: "롤백 완료 후 정리 작업을 시작합니다"
+
+# 임시 파일 정리
+- name: "임시 파일 목록 확인"
+  find:
+    paths:
+      - /tmp
+      - /var/tmp
+    patterns:
+      - "k8s-rollback-*"
+      - "rollback-*.tmp"
+      - "kubeadm-*"
+    age: "1h"
+  register: temp_files
+
+- name: "임시 파일 정리"
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ temp_files.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  ignore_errors: true
+
+# 롤백 과정에서 생성된 백업 파일 정리 (선택적)
+- name: "롤백 중 생성된 백업 파일 확인"
+  find:
+    paths:
+      - "{{ k8s_config_dir | dirname }}"
+      - /etc/systemd/system
+    patterns:
+      - "*.rollback-backup.*"
+      - "*.backup.*"
+    age: "{{ k8s_cleanup_backup_age | default('1d') }}"
+  register: rollback_backup_files
+  when: k8s_cleanup_rollback_backups | default(false)
+
+- name: "롤백 백업 파일 정리"
+  file:
+    path: "{{ item.path }}"
+    state: absent
+  loop: "{{ rollback_backup_files.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when: 
+    - k8s_cleanup_rollback_backups | default(false)
+    - rollback_backup_files is defined
+  ignore_errors: true
+
+# 컨테이너 이미지 정리 (선택적)
+- name: "사용되지 않는 컨테이너 이미지 정리"
+  shell: |
+    if command -v crictl >/dev/null 2>&1; then
+      crictl rmi --prune 2>/dev/null || true
+    fi
+    if command -v docker >/dev/null 2>&1; then
+      docker image prune -f 2>/dev/null || true
+    fi
+  when: k8s_cleanup_container_images | default(false)
+  ignore_errors: true
+
+# 패키지 캐시 정리
+- name: "패키지 캐시 정리 (YUM)"
+  shell: |
+    yum clean all 2>/dev/null || true
+  when: 
+    - k8s_cleanup_package_cache | default(false)
+    - ansible_os_family == "RedHat"
+  ignore_errors: true
+
+- name: "패키지 캐시 정리 (APT)"
+  shell: |
+    apt-get clean 2>/dev/null || true
+    apt-get autoclean 2>/dev/null || true
+  when: 
+    - k8s_cleanup_package_cache | default(false)
+    - ansible_os_family == "Debian"
+  ignore_errors: true
+
+# 로그 파일 압축 (오래된 것만)
+- name: "오래된 로그 파일 확인"
+  find:
+    paths:
+      - /var/log
+      - /var/log/pods
+    patterns:
+      - "*.log"
+    age: "{{ k8s_log_compress_age | default('7d') }}"
+    size: "{{ k8s_log_compress_size | default('100m') }}"
+  register: old_log_files
+  when: k8s_compress_old_logs | default(false)
+
+- name: "오래된 로그 파일 압축"
+  shell: |
+    gzip "{{ item.path }}" 2>/dev/null || true
+  loop: "{{ old_log_files.files }}"
+  loop_control:
+    label: "{{ item.path }}"
+  when: 
+    - k8s_compress_old_logs | default(false)
+    - old_log_files is defined
+  ignore_errors: true
+
+# systemd 저널 정리
+- name: "systemd 저널 크기 정리"
+  shell: |
+    journalctl --vacuum-time={{ k8s_journal_retention | default('7d') }}
+    journalctl --vacuum-size={{ k8s_journal_max_size | default('500M') }}
+  when: k8s_cleanup_systemd_journal | default(false)
+  ignore_errors: true
+
+# kubelet 로그 정리
+- name: "kubelet 로그 파일 확인"
+  stat:
+    path: /var/log/kubelet.log
+  register: kubelet_log_stat
+
+- name: "kubelet 로그 백업 및 정리"
+  shell: |
+    if [ -f /var/log/kubelet.log ] && [ $(stat -f%z /var/log/kubelet.log 2>/dev/null || stat -c%s /var/log/kubelet.log 2>/dev/null) -gt 104857600 ]; then
+      cp /var/log/kubelet.log /var/log/kubelet.log.$(date +%Y%m%d-%H%M%S)
+      > /var/log/kubelet.log
+    fi
+  when: 
+    - k8s_cleanup_kubelet_logs | default(false)
+    - kubelet_log_stat.stat.exists | default(false)
+  ignore_errors: true
+
+# 롤백 상태 파일 생성
+- name: "롤백 완료 상태 파일 생성"
+  copy:
+    content: |
+      # Kubernetes 클러스터 롤백 완료 정보
+      롤백 완료 시간: {{ ansible_date_time.iso8601 }}
+      호스트명: {{ inventory_hostname }}
+      노드 역할: {{ k8s_detected_role }}
+      백업 타임스탬프: {{ k8s_backup_timestamp }}
+      롤백 모드: {{ k8s_rollback_mode }}
+      복원된 버전: {{ restored_version.stdout | default('Unknown') }}
+      OS: {{ ansible_distribution }} {{ ansible_distribution_version }}
+      롤백 실행자: {{ ansible_user_id }}
+    dest: "{{ k8s_backup_dir }}/rollback-{{ k8s_backup_timestamp }}-complete.txt"
+    mode: '0644'
+
+# 재부팅 필요 여부 확인
+- name: "재부팅 필요 여부 확인"
+  stat:
+    path: /var/run/reboot-required
+  register: reboot_required
+  when: ansible_os_family == "Debian"
+
+- name: "재부팅 권장 사항 (Ubuntu/Debian)"
+  debug:
+    msg: 
+      - "⚠️  시스템 재부팅이 권장됩니다"
+      - "수동으로 재부팅을 실행하세요: sudo reboot"
+  when: 
+    - ansible_os_family == "Debian"
+    - reboot_required.stat.exists | default(false)
+
+# 서비스 상태 최종 확인
+- name: "주요 서비스 최종 상태 확인"
+  systemd:
+    name: "{{ item }}"
+  register: final_service_check
+  loop:
+    - kubelet
+    - "{{ k8s_container_runtime }}"
+  failed_when: false
+
+- name: "서비스 상태 요약"
+  debug:
+    msg:
+      - "==================== 서비스 상태 요약 ===================="
+      - "kubelet: {{ final_service_check.results[0].status.ActiveState if final_service_check.results[0].status is defined else 'Unknown' }}"
+      - "{{ k8s_container_runtime }}: {{ final_service_check.results[1].status.ActiveState if final_service_check.results[1].status is defined else 'Unknown' }}"
+      - "=========================================================="
+
+# 정리 완료 요약
+- name: "정리 작업 완료 요약"
+  debug:
+    msg:
+      - "==================== 정리 작업 완료 ===================="
+      - "임시 파일 정리: {{ temp_files.files | length }}개 파일"
+      - "정리 완료 시간: {{ ansible_date_time.iso8601 }}"
+      - "상태 파일: {{ k8s_backup_dir }}/rollback-{{ k8s_backup_timestamp }}-complete.txt"
+      - "=========================================================="
+
+# 사용자 안내 메시지
+- name: "롤백 완료 안내"
+  debug:
+    msg:
+      - "🎉 Kubernetes 클러스터 롤백이 성공적으로 완료되었습니다!"
+      - ""
+      - "📋 확인 사항:"
+      - "  - kubectl get nodes"
+      - "  - kubectl get pods --all-namespaces"
+      - "  - systemctl status kubelet"
+      - ""
+      - "📁 상태 파일: {{ k8s_backup_dir }}/rollback-{{ k8s_backup_timestamp }}-complete.txt"
+      - "📊 복원된 버전: {{ restored_version.stdout | default('확인 필요') }}"
+      - ""
+      - "⚠️  롤백 후 애플리케이션의 정상 동작을 확인해주세요."
+
+- name: "정리 작업 완료"
+  debug:
+    msg: "롤백 정리 작업이 완료되었습니다" 

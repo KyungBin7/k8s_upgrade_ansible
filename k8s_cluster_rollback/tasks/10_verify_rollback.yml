@@ -1,0 +1,185 @@
+---
+# 롤백 후 클러스터 상태 검증
+
+- name: "롤백 검증 시작"
+  debug:
+    msg: "롤백 완료 후 클러스터 상태를 검증합니다"
+
+# 기본 연결성 테스트
+- name: "kubectl 연결 테스트"
+  shell: kubectl cluster-info
+  register: kubectl_test
+  failed_when: false
+  changed_when: false
+
+- name: "kubectl 연결 상태"
+  debug:
+    msg: "kubectl 연결 {{ '성공' if kubectl_test.rc == 0 else '실패' }}"
+
+# 노드 상태 확인
+- name: "모든 노드 상태 확인"
+  shell: |
+    kubectl get nodes -o wide
+  register: all_nodes_status
+  failed_when: false
+  changed_when: false
+  run_once: true
+  delegate_to: "{{ groups['masters'][0] | default(groups['all'][0]) }}"
+
+- name: "노드 상태 출력"
+  debug:
+    var: all_nodes_status.stdout_lines
+  when: all_nodes_status.rc == 0
+  run_once: true
+
+# 현재 노드 Ready 상태 확인
+- name: "현재 노드 Ready 상태 확인"
+  shell: |
+    kubectl get node {{ ansible_hostname }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}' 2>/dev/null || echo "False"
+  register: node_ready_check
+  until: node_ready_check.stdout == "True"
+  retries: "{{ k8s_health_check_retries }}"
+  delay: "{{ k8s_health_check_delay }}"
+  failed_when: false
+
+- name: "현재 노드 상태 결과"
+  debug:
+    msg: "노드 {{ ansible_hostname }} 상태: {{ 'Ready' if node_ready_check.stdout == 'True' else 'NotReady' }}"
+
+# 컨트롤 플레인 파드 상태 확인 (마스터 노드)
+- name: "컨트롤 플레인 파드 상태 확인"
+  shell: |
+    kubectl get pods -n kube-system -l tier=control-plane --field-selector spec.nodeName={{ ansible_hostname }} -o wide
+  register: control_plane_pods
+  when: k8s_detected_role == "master"
+  failed_when: false
+  changed_when: false
+
+- name: "컨트롤 플레인 파드 상태 출력"
+  debug:
+    var: control_plane_pods.stdout_lines
+  when: 
+    - k8s_detected_role == "master"
+    - control_plane_pods.rc == 0
+
+# etcd 상태 확인 (첫 번째 마스터에서만)
+- name: "etcd 상태 확인"
+  shell: |
+    kubectl exec -n kube-system etcd-{{ ansible_hostname }} -- \
+      etcdctl --endpoints=https://127.0.0.1:2379 \
+      --cacert=/etc/kubernetes/pki/etcd/ca.crt \
+      --cert=/etc/kubernetes/pki/etcd/server.crt \
+      --key=/etc/kubernetes/pki/etcd/server.key \
+      endpoint health
+  register: etcd_health
+  when: 
+    - k8s_detected_role == "master"
+    - k8s_is_first_master | default(false)
+  failed_when: false
+  changed_when: false
+
+- name: "etcd 상태 결과"
+  debug:
+    msg: "etcd 상태: {{ '정상' if etcd_health.rc == 0 else '비정상' }}"
+  when: 
+    - k8s_detected_role == "master"
+    - k8s_is_first_master | default(false)
+    - etcd_health is defined
+
+# 시스템 파드 상태 확인
+- name: "시스템 파드 상태 확인"
+  shell: |
+    kubectl get pods -n kube-system --field-selector spec.nodeName={{ ansible_hostname }} -o jsonpath='{.items[*].status.phase}' | grep -v Running | wc -l
+  register: non_running_pods
+  failed_when: false
+  changed_when: false
+
+- name: "시스템 파드 상태 결과"
+  debug:
+    msg: "비정상 시스템 파드 수: {{ non_running_pods.stdout }}"
+  when: non_running_pods.rc == 0
+
+# CoreDNS 상태 확인
+- name: "CoreDNS 상태 확인"
+  shell: |
+    kubectl get pods -n kube-system -l k8s-app=kube-dns -o jsonpath='{.items[*].status.phase}' | grep -v Running | wc -l
+  register: coredns_status
+  run_once: true
+  delegate_to: "{{ groups['masters'][0] | default(groups['all'][0]) }}"
+  failed_when: false
+  changed_when: false
+
+- name: "CoreDNS 상태 결과"
+  debug:
+    msg: "CoreDNS 상태: {{ '정상' if coredns_status.stdout == '0' else '비정상' }}"
+  when: coredns_status.rc == 0
+  run_once: true
+
+# 서비스 상태 확인
+- name: "주요 서비스 상태 확인"
+  systemd:
+    name: "{{ item }}"
+  register: service_status_check
+  loop:
+    - kubelet
+    - "{{ k8s_container_runtime }}"
+  failed_when: false
+
+- name: "서비스 상태 결과"
+  debug:
+    msg:
+      - "서비스: {{ item.item }}"
+      - "상태: {{ item.status.ActiveState if item.status is defined else 'Unknown' }}"
+      - "실행 여부: {{ '정상' if item.status.ActiveState == 'active' else '비정상' }}"
+  loop: "{{ service_status_check.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+# 버전 확인
+- name: "복원된 버전 확인"
+  shell: |
+    kubelet --version | awk '{print $2}' | sed 's/v//'
+  register: restored_version
+  changed_when: false
+  failed_when: false
+
+- name: "복원된 버전 결과"
+  debug:
+    msg: 
+      - "복원된 kubelet 버전: {{ restored_version.stdout }}"
+      - "백업 타임스탬프: {{ k8s_backup_timestamp }}"
+
+# 네트워킹 테스트 (선택적)
+- name: "네트워킹 테스트 파드 생성"
+  shell: |
+    kubectl run rollback-test-{{ ansible_date_time.epoch }} --image=busybox --restart=Never --rm -i --tty -- nslookup kubernetes.default.svc.cluster.local
+  register: network_test
+  when: 
+    - k8s_test_networking_after_rollback | default(false)
+    - k8s_detected_role == "master"
+  failed_when: false
+  changed_when: false
+  timeout: 30
+
+- name: "네트워킹 테스트 결과"
+  debug:
+    msg: "네트워킹 테스트: {{ '성공' if network_test.rc == 0 else '실패' }}"
+  when: 
+    - k8s_test_networking_after_rollback | default(false)
+    - k8s_detected_role == "master"
+    - network_test is defined
+
+# 검증 요약
+- name: "롤백 검증 요약"
+  debug:
+    msg:
+      - "==================== 롤백 검증 요약 ===================="
+      - "노드 상태: {{ 'Ready' if node_ready_check.stdout == 'True' else 'NotReady' }}"
+      - "kubelet 서비스: {{ 'Active' if service_status_check.results[0].status.ActiveState == 'active' else 'Inactive' }}"
+      - "복원된 버전: {{ restored_version.stdout }}"
+      - "검증 시간: {{ ansible_date_time.iso8601 }}"
+      - "======================================================="
+
+- name: "롤백 검증 완료"
+  debug:
+    msg: "롤백 후 클러스터 상태 검증이 완료되었습니다" 

@@ -1,0 +1,140 @@
+---
+# Kubernetes 패키지 다운그레이드
+
+- name: "패키지 다운그레이드 시작"
+  debug:
+    msg: "Kubernetes 패키지를 이전 버전으로 다운그레이드합니다"
+
+# 백업된 패키지 정보 확인
+- name: "백업된 패키지 정보 확인"
+  stat:
+    path: "{{ k8s_backup_source_dir }}/package-info.txt"
+  register: package_info_stat
+
+- name: "백업된 패키지 정보 읽기"
+  slurp:
+    src: "{{ k8s_backup_source_dir }}/package-info.txt"
+  register: package_info_content
+  when: package_info_stat.stat.exists | default(false)
+
+# 백업 정보에서 버전 추출
+- name: "백업된 패키지 버전 추출"
+  set_fact:
+    backup_package_versions: "{{ (package_info_content['content'] | b64decode).split('\n') }}"
+  when: package_info_stat.stat.exists | default(false)
+
+# YUM 기반 시스템 (RedHat/CentOS/Rocky)
+- name: "YUM - Kubernetes 패키지 언홀드"
+  shell: |
+    yum versionlock delete kubectl kubelet kubeadm 2>/dev/null || true
+  when: 
+    - k8s_detected_package_manager == "yum"
+    - ansible_os_family == "RedHat"
+  ignore_errors: true
+
+- name: "YUM - 현재 패키지 제거"
+  yum:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: absent
+    disable_gpg_check: true
+  when: 
+    - k8s_detected_package_manager == "yum"
+    - ansible_os_family == "RedHat"
+    - k8s_force_package_downgrade | default(false)
+  ignore_errors: true
+
+- name: "YUM - 백업 버전 패키지 설치"
+  yum:
+    name:
+      - "kubelet-{{ k8s_backup_version }}"
+      - "kubeadm-{{ k8s_backup_version }}"
+      - "kubectl-{{ k8s_backup_version }}"
+    state: present
+    disable_gpg_check: true
+  when: 
+    - k8s_detected_package_manager == "yum"
+    - ansible_os_family == "RedHat"
+    - k8s_backup_version is defined
+  ignore_errors: true
+
+- name: "YUM - 패키지 버전 고정"
+  shell: |
+    yum versionlock add kubectl kubelet kubeadm
+  when: 
+    - k8s_detected_package_manager == "yum"
+    - ansible_os_family == "RedHat"
+  ignore_errors: true
+
+# APT 기반 시스템 (Ubuntu/Debian)
+- name: "APT - Kubernetes 패키지 언홀드"
+  shell: |
+    apt-mark unhold kubelet kubeadm kubectl
+  when: 
+    - k8s_detected_package_manager == "apt"
+    - ansible_os_family == "Debian"
+  ignore_errors: true
+
+- name: "APT - 현재 패키지 제거"
+  apt:
+    name:
+      - kubelet
+      - kubeadm
+      - kubectl
+    state: absent
+    force: true
+  when: 
+    - k8s_detected_package_manager == "apt"
+    - ansible_os_family == "Debian"
+    - k8s_force_package_downgrade | default(false)
+  ignore_errors: true
+
+- name: "APT - 백업 버전 패키지 설치"
+  apt:
+    name:
+      - "kubelet={{ k8s_backup_version }}-*"
+      - "kubeadm={{ k8s_backup_version }}-*"
+      - "kubectl={{ k8s_backup_version }}-*"
+    state: present
+    force: true
+    allow_downgrade: true
+  when: 
+    - k8s_detected_package_manager == "apt"
+    - ansible_os_family == "Debian"
+    - k8s_backup_version is defined
+  ignore_errors: true
+
+- name: "APT - 패키지 버전 고정"
+  shell: |
+    apt-mark hold kubelet kubeadm kubectl
+  when: 
+    - k8s_detected_package_manager == "apt"
+    - ansible_os_family == "Debian"
+  ignore_errors: true
+
+# 설치된 버전 확인
+- name: "다운그레이드된 패키지 버전 확인"
+  shell: |
+    kubelet --version 2>/dev/null | awk '{print $2}' | sed 's/v//' || echo "설치 실패"
+  register: downgraded_version
+  changed_when: false
+
+- name: "패키지 다운그레이드 결과"
+  debug:
+    msg: 
+      - "패키지 다운그레이드 완료"
+      - "설치된 버전: {{ downgraded_version.stdout }}"
+      - "목표 버전: {{ k8s_backup_version | default('N/A') }}"
+
+# kubelet 서비스 활성화
+- name: "kubelet 서비스 활성화"
+  systemd:
+    name: kubelet
+    enabled: true
+    daemon_reload: true
+
+- name: "패키지 다운그레이드 완료"
+  debug:
+    msg: "Kubernetes 패키지 다운그레이드가 완료되었습니다" 
