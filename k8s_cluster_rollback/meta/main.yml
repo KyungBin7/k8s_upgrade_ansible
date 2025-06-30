@@ -1,0 +1,35 @@
+---
+galaxy_info:
+  author: MetaNet DevOps Team
+  description: Kubernetes 클러스터 롤백을 위한 Ansible role
+  company: MetaNet
+  license: MIT
+  min_ansible_version: "2.12"
+  
+  platforms:
+    - name: EL
+      versions:
+        - "8"
+        - "9"
+    - name: Ubuntu
+      versions:
+        - "18.04"
+        - "20.04"
+        - "22.04"
+        - "24.04"
+    - name: Rocky
+      versions:
+        - "8"
+        - "9"
+
+  galaxy_tags:
+    - kubernetes
+    - k8s
+    - cluster
+    - rollback
+    - restore
+    - backup
+    - devops
+    - containerization
+
+dependencies: [] 

@@ -1,0 +1,224 @@
+---
+# etcd 복원
+
+- name: "etcd 복원 시작"
+  debug:
+    msg: "etcd 데이터 복원을 시작합니다."
+
+# etcd 스냅샷 파일 존재 확인
+- name: "etcd 스냅샷 파일 확인"
+  stat:
+    path: "{{ k8s_rollback_files.etcd_snapshot }}"
+  register: etcd_snapshot_exists
+  failed_when: not etcd_snapshot_exists.stat.exists
+
+# etcd 서비스 중지 확인
+- name: "etcd 서비스 상태 확인"
+  systemd:
+    name: etcd
+    state: stopped
+  when: not k8s_dry_run | default(false)
+
+# 기존 etcd 데이터 백업
+- name: "기존 etcd 데이터 백업"
+  archive:
+    path: "{{ k8s_etcd_data_dir }}"
+    dest: "{{ k8s_temp_dirs.backup_current }}/etcd-current-{{ ansible_date_time.epoch }}.tar.gz"
+    format: gz
+  when: 
+    - not k8s_dry_run | default(false)
+    - k8s_backup_before_rollback | default(false)
+  ignore_errors: true
+
+# 기존 etcd 데이터 디렉토리 정리
+- name: "기존 etcd 데이터 디렉토리 제거"
+  file:
+    path: "{{ k8s_etcd_data_dir }}"
+    state: absent
+  when: not k8s_dry_run | default(false)
+
+# etcd 데이터 디렉토리 재생성
+- name: "etcd 데이터 디렉토리 생성"
+  file:
+    path: "{{ k8s_etcd_data_dir }}"
+    state: directory
+    owner: etcd
+    group: etcd
+    mode: '0700'
+  when: not k8s_dry_run | default(false)
+
+# etcd 스냅샷 복원
+- name: "etcd 스냅샷 복원"
+  shell: |
+    ETCDCTL_API=3 etcdctl snapshot restore {{ k8s_rollback_files.etcd_snapshot }} \
+      --data-dir={{ k8s_etcd_data_dir }} \
+      --name={{ inventory_hostname }} \
+      --initial-cluster="{{ inventory_hostname }}=https://{{ ansible_default_ipv4.address }}:2380" \
+      --initial-cluster-token=etcd-cluster-1 \
+      --initial-advertise-peer-urls=https://{{ ansible_default_ipv4.address }}:2380
+  register: etcd_restore_result
+  when: not k8s_dry_run | default(false)
+  environment:
+    ETCDCTL_CACERT: "{{ k8s_config_dir }}/pki/etcd/ca.crt"
+    ETCDCTL_CERT: "{{ k8s_config_dir }}/pki/etcd/server.crt"
+    ETCDCTL_KEY: "{{ k8s_config_dir }}/pki/etcd/server.key"
+
+- name: "etcd 복원 결과 표시"
+  debug:
+    msg: 
+      - "etcd 복원: {{ 'OK' if etcd_restore_result.rc == 0 else 'Failed' }}"
+      - "{{ etcd_restore_result.stdout_lines | default(['N/A']) }}"
+  when: 
+    - not k8s_dry_run | default(false)
+    - etcd_restore_result is defined
+
+# etcd 데이터 디렉토리 권한 설정
+- name: "etcd 데이터 디렉토리 권한 설정"
+  file:
+    path: "{{ k8s_etcd_data_dir }}"
+    owner: etcd
+    group: etcd
+    mode: '0700'
+    recurse: yes
+  when: not k8s_dry_run | default(false)
+
+# etcd 서비스 시작
+- name: "etcd 서비스 시작"
+  systemd:
+    name: etcd
+    state: started
+    enabled: yes
+    daemon_reload: yes
+  when: not k8s_dry_run | default(false)
+
+# etcd 서비스 시작 대기
+- name: "etcd 서비스 시작 대기"
+  wait_for:
+    port: 2379
+    host: "{{ ansible_default_ipv4.address }}"
+    timeout: "{{ k8s_etcd_restore_timeout }}"
+  when: not k8s_dry_run | default(false)
+
+# etcd 상태 확인
+- name: "etcd 상태 확인"
+  shell: |
+    ETCDCTL_API=3 etcdctl endpoint health \
+      --endpoints=https://127.0.0.1:2379 \
+      --cacert={{ k8s_config_dir }}/pki/etcd/ca.crt \
+      --cert={{ k8s_config_dir }}/pki/etcd/server.crt \
+      --key={{ k8s_config_dir }}/pki/etcd/server.key
+  register: etcd_health_result
+  retries: "{{ k8s_health_check_retries }}"
+  delay: "{{ k8s_health_check_delay }}"
+  until: etcd_health_result.rc == 0
+  when: not k8s_dry_run | default(false)
+
+- name: "etcd 헬스체크 결과 표시"
+  debug:
+    msg: 
+      - "etcd 헬스체크: {{ 'OK' if etcd_health_result.rc == 0 else 'Failed' }}"
+      - "{{ etcd_health_result.stdout_lines | default(['N/A']) }}"
+  when: 
+    - not k8s_dry_run | default(false)
+    - etcd_health_result is defined
+
+# etcd 멤버 목록 확인
+- name: "etcd 멤버 목록 확인"
+  shell: |
+    ETCDCTL_API=3 etcdctl member list \
+      --endpoints=https://127.0.0.1:2379 \
+      --cacert={{ k8s_config_dir }}/pki/etcd/ca.crt \
+      --cert={{ k8s_config_dir }}/pki/etcd/server.crt \
+      --key={{ k8s_config_dir }}/pki/etcd/server.key
+  register: etcd_member_list_result
+  when: 
+    - not k8s_dry_run | default(false)
+    - k8s_etcd_restore_verify | default(true)
+  ignore_errors: true
+
+- name: "etcd 멤버 목록 표시"
+  debug:
+    msg: "{{ etcd_member_list_result.stdout_lines }}"
+  when: 
+    - not k8s_dry_run | default(false)
+    - k8s_etcd_restore_verify | default(true)
+    - etcd_member_list_result.rc == 0
+
+# 복원된 데이터 기본 검증
+- name: "복원된 etcd 데이터 기본 검증"
+  shell: |
+    ETCDCTL_API=3 etcdctl get /registry --prefix --keys-only \
+      --endpoints=https://127.0.0.1:2379 \
+      --cacert={{ k8s_config_dir }}/pki/etcd/ca.crt \
+      --cert={{ k8s_config_dir }}/pki/etcd/server.crt \
+      --key={{ k8s_config_dir }}/pki/etcd/server.key \
+      | head -20
+  register: etcd_data_verification
+  when: 
+    - not k8s_dry_run | default(false)
+    - k8s_etcd_restore_verify | default(true)
+  ignore_errors: true
+
+- name: "복원된 데이터 검증 결과 표시"
+  debug:
+    msg: 
+      - "복원된 etcd 키 (샘플):"
+      - "{{ etcd_data_verification.stdout_lines | default(['데이터 없음']) }}"
+  when: 
+    - not k8s_dry_run | default(false)
+    - k8s_etcd_restore_verify | default(true)
+    - etcd_data_verification is defined
+
+# 드라이런 모드 메시지
+- name: "etcd 복원 계획 (드라이런)"
+  debug:
+    msg:
+      - "=== etcd 복원 계획 (드라이런 모드) ==="
+      - "복원할 스냅샷: {{ k8s_rollback_files.etcd_snapshot }}"
+      - "대상 데이터 디렉토리: {{ k8s_etcd_data_dir }}"
+      - "복원 명령어:"
+      - "  ETCDCTL_API=3 etcdctl snapshot restore {{ k8s_rollback_files.etcd_snapshot }}"
+      - "  --data-dir={{ k8s_etcd_data_dir }}"
+      - "  --name={{ inventory_hostname }}"
+      - "  --initial-cluster={{ inventory_hostname }}=https://{{ ansible_default_ipv4.address }}:2380"
+  when: k8s_dry_run | default(false)
+
+# 오류 복구 처리
+- name: "etcd 복원 실패 시 복구"
+  block:
+    - name: "etcd 서비스 중지"
+      systemd:
+        name: etcd
+        state: stopped
+
+    - name: "손상된 데이터 디렉토리 정리"
+      file:
+        path: "{{ k8s_etcd_data_dir }}"
+        state: absent
+
+    - name: "백업된 현재 데이터 복원 (있는 경우)"
+      unarchive:
+        src: "{{ k8s_temp_dirs.backup_current }}/etcd-current-{{ ansible_date_time.epoch }}.tar.gz"
+        dest: "/"
+        remote_src: yes
+      when: k8s_backup_before_rollback | default(false)
+      ignore_errors: true
+
+  rescue:
+    - name: "etcd 복원 복구 실패"
+      debug:
+        msg: "etcd 복원 복구에 실패했습니다. 수동 개입이 필요합니다."
+
+  when: 
+    - not k8s_dry_run | default(false)
+    - etcd_restore_result is defined
+    - etcd_restore_result.rc != 0
+    - k8s_enable_recovery_mode | default(true)
+
+- name: "etcd 복원 완료"
+  debug:
+    msg:
+      - "=== etcd 복원 완료 ==="
+      - "스냅샷 파일: {{ k8s_rollback_files.etcd_snapshot }}"
+      - "복원 상태: {{ '성공' if etcd_restore_result.rc == 0 else '실패' if etcd_restore_result is defined else '스킵됨' }}"
+      - "etcd 서비스: {{ '실행 중' if etcd_health_result.rc == 0 else '중지됨' if etcd_health_result is defined else '확인 안됨' }}" 

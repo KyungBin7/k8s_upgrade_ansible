@@ -1,0 +1,230 @@
+---
+# 노드 역할 및 환경 감지
+
+- name: "환경 감지 시작"
+  debug:
+    msg: "노드 역할 및 환경을 감지합니다."
+
+# 마스터 노드 지시자 파일 확인
+- name: "마스터 노드 지시자 파일 확인"
+  stat:
+    path: "{{ item }}"
+  register: master_indicators_check
+  loop: "{{ k8s_master_indicators }}"
+  loop_control:
+    label: "{{ item }}"
+
+# 노드 역할 감지
+- name: "노드 역할 결정 (파일 기반)"
+  set_fact:
+    k8s_detected_role: "master"
+  when: master_indicators_check.results | selectattr('stat.exists') | list | length > 0
+
+- name: "노드 역할 결정 (기본값: worker)"
+  set_fact:
+    k8s_detected_role: "worker"
+  when: k8s_detected_role is not defined
+
+# kubectl을 통한 노드 역할 확인 (가능한 경우)
+- name: "kubectl을 통한 노드 역할 확인"
+  shell: kubectl get node {{ inventory_hostname }} -o jsonpath='{.metadata.labels.node-role\.kubernetes\.io/master}'
+  register: kubectl_role_check
+  ignore_errors: true
+  changed_when: false
+  when: current_cluster_status.rc == 0
+
+- name: "kubectl 기반 역할 확인 결과"
+  set_fact:
+    k8s_kubectl_role: "{{ 'master' if kubectl_role_check.stdout != '' else 'worker' }}"
+  when: 
+    - current_cluster_status.rc == 0
+    - kubectl_role_check.rc == 0
+
+# 인벤토리 그룹을 통한 역할 확인
+- name: "인벤토리 그룹 기반 역할 확인"
+  set_fact:
+    k8s_inventory_role: "master"
+  when: inventory_hostname in groups['k8s_masters'] | default([])
+
+- name: "인벤토리 그룹 기반 역할 확인 (worker)"
+  set_fact:
+    k8s_inventory_role: "worker"
+  when: 
+    - k8s_inventory_role is not defined
+    - inventory_hostname in groups['k8s_workers'] | default([])
+
+# 첫 번째 마스터 노드 여부 확인
+- name: "첫 번째 마스터 노드 여부 확인"
+  set_fact:
+    k8s_is_first_master: true
+  when: 
+    - k8s_detected_role == "master"
+    - inventory_hostname == groups['k8s_masters'][0] | default('')
+
+- name: "첫 번째 마스터 노드 여부 설정 (기본값)"
+  set_fact:
+    k8s_is_first_master: false
+  when: k8s_is_first_master is not defined
+
+# 패키지 관리자 감지
+- name: "패키지 관리자 감지 (RedHat 계열)"
+  set_fact:
+    k8s_detected_package_manager: "yum"
+  when: ansible_os_family == "RedHat"
+
+- name: "패키지 관리자 감지 (Debian 계열)"
+  set_fact:
+    k8s_detected_package_manager: "apt"
+  when: ansible_os_family == "Debian"
+
+# 바이너리 설치 여부 확인
+- name: "현재 Kubernetes 바이너리 확인"
+  stat:
+    path: "{{ k8s_bin_dir }}/{{ item }}"
+  register: current_binaries_check
+  loop: "{{ k8s_backup_binaries }}"
+
+- name: "바이너리 설치 여부 판단"
+  set_fact:
+    k8s_detected_package_manager: "binary"
+  when: current_binaries_check.results | selectattr('stat.exists') | list | length > 0
+
+# 패키지 설치 여부 확인 (yum)
+- name: "yum 패키지 설치 확인"
+  shell: "yum list installed | grep -E '^(kubeadm|kubelet|kubectl)'"
+  register: yum_packages_check
+  ignore_errors: true
+  changed_when: false
+  when: k8s_detected_package_manager == "yum"
+
+- name: "패키지 관리자 재설정 (yum)"
+  set_fact:
+    k8s_detected_package_manager: "yum"
+  when: 
+    - k8s_detected_package_manager == "yum"
+    - yum_packages_check.rc == 0
+    - yum_packages_check.stdout_lines | length > 0
+
+# 패키지 설치 여부 확인 (apt)
+- name: "apt 패키지 설치 확인"
+  shell: "dpkg -l | grep -E '^ii\\s+(kubeadm|kubelet|kubectl)'"
+  register: apt_packages_check
+  ignore_errors: true
+  changed_when: false
+  when: k8s_detected_package_manager == "apt"
+
+- name: "패키지 관리자 재설정 (apt)"
+  set_fact:
+    k8s_detected_package_manager: "apt"
+  when: 
+    - k8s_detected_package_manager == "apt"
+    - apt_packages_check.rc == 0
+    - apt_packages_check.stdout_lines | length > 0
+
+# 컨테이너 런타임 감지
+- name: "컨테이너 런타임 감지"
+  shell: |
+    if systemctl is-active containerd >/dev/null 2>&1; then
+      echo "containerd"
+    elif systemctl is-active crio >/dev/null 2>&1; then
+      echo "cri-o"
+    elif systemctl is-active docker >/dev/null 2>&1; then
+      echo "docker"
+    else
+      echo "unknown"
+    fi
+  register: container_runtime_check
+  changed_when: false
+
+- name: "컨테이너 런타임 설정"
+  set_fact:
+    k8s_active_runtime: "{{ container_runtime_check.stdout }}"
+
+# 현재 Kubernetes 버전 확인
+- name: "현재 Kubernetes 버전 확인"
+  shell: |
+    if [ -f "{{ k8s_bin_dir }}/kubectl" ]; then
+      {{ k8s_bin_dir }}/kubectl version --client --short 2>/dev/null | grep 'Client Version' | awk '{print $3}' | sed 's/v//'
+    elif command -v kubectl >/dev/null 2>&1; then
+      kubectl version --client --short 2>/dev/null | grep 'Client Version' | awk '{print $3}' | sed 's/v//'
+    else
+      echo "unknown"
+    fi
+  register: current_k8s_version
+  changed_when: false
+
+- name: "현재 버전 설정"
+  set_fact:
+    k8s_current_version: "{{ current_k8s_version.stdout }}"
+
+# 네트워크 플러그인 감지
+- name: "CNI 플러그인 감지"
+  shell: |
+    if kubectl get pods -n kube-system -o name | grep -q flannel; then
+      echo "flannel"
+    elif kubectl get pods -n kube-system -o name | grep -q calico; then
+      echo "calico"
+    elif kubectl get pods -n kube-system -o name | grep -q weave; then
+      echo "weave"
+    else
+      echo "unknown"
+    fi
+  register: cni_plugin_check
+  ignore_errors: true
+  changed_when: false
+  when: current_cluster_status.rc == 0
+
+- name: "CNI 플러그인 설정"
+  set_fact:
+    k8s_detected_cni: "{{ cni_plugin_check.stdout | default('unknown') }}"
+
+# 감지 결과 표시
+- name: "환경 감지 결과 표시"
+  debug:
+    msg:
+      - "=== 환경 감지 결과 ==="
+      - "노드 역할: {{ k8s_detected_role }}"
+      - "첫 번째 마스터: {{ k8s_is_first_master }}"
+      - "패키지 관리자: {{ k8s_detected_package_manager }}"
+      - "컨테이너 런타임: {{ k8s_active_runtime }}"
+      - "현재 K8s 버전: {{ k8s_current_version }}"
+      - "CNI 플러그인: {{ k8s_detected_cni | default('unknown') }}"
+      - "OS 정보: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+
+# 역할 불일치 경고 (인벤토리와 감지 결과)
+- name: "역할 불일치 경고"
+  debug:
+    msg:
+      - "경고: 감지된 역할과 인벤토리 역할이 다릅니다."
+      - "감지된 역할: {{ k8s_detected_role }}"
+      - "인벤토리 역할: {{ k8s_inventory_role | default('정의되지 않음') }}"
+  when: 
+    - k8s_inventory_role is defined
+    - k8s_detected_role != k8s_inventory_role
+
+# kubectl 역할과 파일 기반 역할 불일치 경고
+- name: "kubectl 역할 불일치 경고"
+  debug:
+    msg:
+      - "경고: kubectl로 확인한 역할과 파일 기반 감지 역할이 다릅니다."
+      - "파일 기반 역할: {{ k8s_detected_role }}"
+      - "kubectl 기반 역할: {{ k8s_kubectl_role }}"
+  when:
+    - k8s_kubectl_role is defined
+    - k8s_detected_role != k8s_kubectl_role
+
+# 임시 디렉토리 생성
+- name: "임시 디렉토리 생성"
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "{{ k8s_temp_dirs.base }}"
+    - "{{ k8s_temp_dirs.restore }}"
+    - "{{ k8s_temp_dirs.backup_current }}"
+    - "{{ k8s_temp_dirs.logs }}"
+
+- name: "환경 감지 완료"
+  debug:
+    msg: "환경 감지가 완료되었습니다." 

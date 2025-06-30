@@ -1,0 +1,216 @@
+---
+# 클러스터 서비스 중지 및 롤백 준비
+
+- name: "롤백 준비 시작"
+  debug:
+    msg: "클러스터 서비스 중지 및 롤백 준비를 시작합니다."
+
+# 워커 노드 드레인 (마스터 노드에서 실행)
+- name: "워커 노드 드레인"
+  shell: kubectl drain {{ inventory_hostname }} --ignore-daemonsets --delete-emptydir-data --force --timeout={{ k8s_service_restart_timeout }}s
+  register: node_drain_result
+  delegate_to: "{{ groups['k8s_masters'][0] }}"
+  when: 
+    - k8s_drain_nodes | default(true)
+    - k8s_detected_role == "worker"
+    - current_cluster_status.rc == 0
+  ignore_errors: true
+
+- name: "노드 드레인 결과 표시"
+  debug:
+    msg: 
+      - "노드 드레인 결과: {{ 'OK' if node_drain_result.rc == 0 else 'Failed' }}"
+      - "{{ node_drain_result.stdout_lines | default(['N/A']) }}"
+  when:
+    - k8s_drain_nodes | default(true)
+    - k8s_detected_role == "worker"
+    - node_drain_result is defined
+
+# 현재 실행 중인 파드 확인 (마스터 노드에서)
+- name: "현재 실행 중인 파드 확인"
+  shell: kubectl get pods --all-namespaces --field-selector spec.nodeName={{ inventory_hostname }}
+  register: running_pods_check
+  delegate_to: "{{ groups['k8s_masters'][0] }}"
+  when: 
+    - current_cluster_status.rc == 0
+    - k8s_detected_role == "worker"
+  ignore_errors: true
+
+- name: "실행 중인 파드 표시"
+  debug:
+    msg: "{{ running_pods_check.stdout_lines }}"
+  when:
+    - current_cluster_status.rc == 0
+    - k8s_detected_role == "worker"
+    - running_pods_check is defined
+    - running_pods_check.rc == 0
+
+# 컨테이너 런타임 중지
+- name: "컨테이너 런타임 중지"
+  systemd:
+    name: "{{ k8s_container_runtimes[k8s_active_runtime].service_name }}"
+    state: stopped
+  when: 
+    - k8s_stop_cluster_services | default(true)
+    - k8s_active_runtime in k8s_container_runtimes
+    - not k8s_dry_run | default(false)
+  ignore_errors: true
+
+# 클러스터 서비스 중지 (순서대로)
+- name: "클러스터 서비스 중지 (마스터)"
+  systemd:
+    name: "{{ item }}"
+    state: stopped
+  loop: "{{ k8s_service_stop_order.master }}"
+  when: 
+    - k8s_detected_role == "master"
+    - k8s_stop_cluster_services | default(true)
+    - not k8s_dry_run | default(false)
+  ignore_errors: true
+
+- name: "클러스터 서비스 중지 (워커)"
+  systemd:
+    name: "{{ item }}"
+    state: stopped
+  loop: "{{ k8s_service_stop_order.worker }}"
+  when: 
+    - k8s_detected_role == "worker"
+    - k8s_stop_cluster_services | default(true)
+    - not k8s_dry_run | default(false)
+  ignore_errors: true
+
+# 서비스 상태 확인
+- name: "서비스 중지 상태 확인"
+  shell: systemctl is-active {{ item }}
+  register: service_stop_check
+  loop: "{{ k8s_service_stop_order[k8s_detected_role] }}"
+  ignore_errors: true
+  changed_when: false
+
+- name: "서비스 중지 상태 표시"
+  debug:
+    msg: "{{ item.item }}: {{ 'stopped' if item.rc != 0 else 'still running' }}"
+  loop: "{{ service_stop_check.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+# 마운트된 컨테이너 볼륨 정리
+- name: "마운트된 컨테이너 볼륨 확인"
+  shell: mount | grep /var/lib/kubelet
+  register: kubelet_mounts_check
+  ignore_errors: true
+  changed_when: false
+
+- name: "kubelet 마운트 정리"
+  shell: umount {{ item }}
+  loop: "{{ kubelet_mounts_check.stdout_lines | map('regex_replace', '^(\\S+)\\s+.*', '\\1') | list }}"
+  when:
+    - kubelet_mounts_check.rc == 0
+    - not k8s_dry_run | default(false)
+  ignore_errors: true
+
+# 네트워크 인터페이스 정리 (CNI)
+- name: "CNI 네트워크 인터페이스 확인"
+  shell: ip link show | grep -E 'flannel|calico|weave|cni' | awk '{print $2}' | sed 's/://'
+  register: cni_interfaces_check
+  ignore_errors: true
+  changed_when: false
+
+- name: "CNI 네트워크 인터페이스 정리"
+  shell: ip link delete {{ item }}
+  loop: "{{ cni_interfaces_check.stdout_lines }}"
+  when:
+    - cni_interfaces_check.rc == 0
+    - not k8s_dry_run | default(false)
+  ignore_errors: true
+
+# iptables 규칙 백업 (복원 시 참고용)
+- name: "현재 iptables 규칙 백업"
+  shell: iptables-save > {{ k8s_temp_dirs.backup_current }}/iptables-rules.bak
+  when: not k8s_dry_run | default(false)
+  ignore_errors: true
+
+# 프로세스 정리 대기
+- name: "프로세스 정리 대기"
+  wait_for:
+    timeout: 30
+  when: not k8s_dry_run | default(false)
+
+# 남은 Kubernetes 프로세스 확인
+- name: "남은 Kubernetes 프로세스 확인"
+  shell: ps aux | grep -E 'kube|etcd' | grep -v grep
+  register: remaining_processes
+  ignore_errors: true
+  changed_when: false
+
+- name: "남은 프로세스 표시"
+  debug:
+    msg: "{{ remaining_processes.stdout_lines }}"
+  when: 
+    - remaining_processes.rc == 0
+    - remaining_processes.stdout_lines | length > 0
+
+# 강제 프로세스 종료 (필요시)
+- name: "남은 Kubernetes 프로세스 강제 종료"
+  shell: pkill -f "{{ item }}"
+  loop:
+    - kube-apiserver
+    - kube-controller-manager
+    - kube-scheduler
+    - kube-proxy
+    - kubelet
+    - etcd
+  when:
+    - remaining_processes.rc == 0
+    - remaining_processes.stdout_lines | length > 0
+    - not k8s_dry_run | default(false)
+  ignore_errors: true
+
+# 임시 파일 정리
+- name: "kubelet 임시 파일 정리"
+  shell: rm -rf /var/lib/kubelet/pods/*
+  when: not k8s_dry_run | default(false)
+  ignore_errors: true
+
+- name: "containerd 임시 파일 정리"
+  shell: |
+    if [ -d /var/lib/containerd ]; then
+      rm -rf /var/lib/containerd/io.containerd.runtime.v1.linux/k8s.io/*
+    fi
+  when: 
+    - k8s_active_runtime == "containerd"
+    - not k8s_dry_run | default(false)
+  ignore_errors: true
+
+- name: "cri-o 임시 파일 정리"
+  shell: |
+    if [ -d /var/lib/containers/storage ]; then
+      rm -rf /var/lib/containers/storage/overlay-containers/*
+    fi
+  when:
+    - k8s_active_runtime == "cri-o"
+    - not k8s_dry_run | default(false)
+  ignore_errors: true
+
+# 롤백 상태 파일 생성
+- name: "롤백 상태 파일 생성"
+  copy:
+    content: |
+      롤백 시작 시간: {{ ansible_date_time.iso8601 }}
+      백업 타임스탬프: {{ k8s_backup_timestamp }}
+      롤백 모드: {{ k8s_rollback_mode }}
+      노드 역할: {{ k8s_detected_role }}
+      호스트명: {{ inventory_hostname }}
+      이전 K8s 버전: {{ k8s_current_version }}
+      상태: 준비 완료
+    dest: "{{ k8s_status_files.rollback_state }}"
+  when: not k8s_dry_run | default(false)
+
+- name: "롤백 준비 완료"
+  debug:
+    msg:
+      - "=== 롤백 준비 완료 ==="
+      - "클러스터 서비스: 중지됨"
+      - "네트워크 정리: 완료"
+      - "임시 파일 정리: 완료"
+      - "롤백 준비: 완료" 

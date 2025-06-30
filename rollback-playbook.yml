@@ -1,0 +1,80 @@
+---
+# Kubernetes 클러스터 롤백 playbook
+
+- name: "Kubernetes 클러스터 롤백"
+  hosts: all
+  become: yes
+  gather_facts: yes
+  vars:
+    # 필수 변수 - 사용자가 설정해야 함
+    # k8s_backup_timestamp: "1703123456"  # 복원할 백업의 타임스탬프
+    
+    # 선택적 변수 - 필요에 따라 오버라이드
+    # k8s_rollback_mode: "full"  # full, binary-only, config-only, etcd-only
+    # k8s_rollback_strategy: "safe"  # safe, force, verify-only
+    # k8s_require_confirmation: false  # CI/CD 환경에서는 false로 설정
+
+  pre_tasks:
+    - name: "playbook 시작"
+      debug:
+        msg:
+          - "=== Kubernetes 클러스터 롤백 playbook 시작 ==="
+          - "대상 호스트: {{ inventory_hostname }}"
+          - "백업 타임스탬프: {{ k8s_backup_timestamp | default('정의되지 않음') }}"
+          - "롤백 모드: {{ k8s_rollback_mode | default('full') }}"
+
+    - name: "필수 변수 확인"
+      fail:
+        msg: |
+          k8s_backup_timestamp 변수가 설정되지 않았습니다.
+          
+          사용 예시:
+          ansible-playbook -i inventory/hosts rollback-playbook.yml \
+            -e "k8s_backup_timestamp=1703123456"
+          
+          또는 group_vars나 host_vars에서 설정하세요.
+      when: k8s_backup_timestamp is not defined or k8s_backup_timestamp == ""
+
+  roles:
+    - k8s_cluster_rollback
+
+  post_tasks:
+    - name: "playbook 완료"
+      debug:
+        msg:
+          - "=== Kubernetes 클러스터 롤백 playbook 완료 ==="
+          - "호스트: {{ inventory_hostname }}"
+          - "백업 타임스탬프: {{ k8s_backup_timestamp }}"
+          - "완료 시간: {{ ansible_date_time.iso8601 }}"
+
+  handlers:
+    - name: systemd_reload
+      systemd:
+        daemon_reload: yes
+
+# 사용 예시:
+# 
+# 1. 전체 롤백:
+#    ansible-playbook -i inventory/hosts rollback-playbook.yml \
+#      -e "k8s_backup_timestamp=1703123456"
+#
+# 2. 바이너리만 롤백:
+#    ansible-playbook -i inventory/hosts rollback-playbook.yml \
+#      -e "k8s_backup_timestamp=1703123456" \
+#      -e "k8s_rollback_mode=binary-only"
+#
+# 3. etcd만 롤백:
+#    ansible-playbook -i inventory/hosts rollback-playbook.yml \
+#      -e "k8s_backup_timestamp=1703123456" \
+#      -e "k8s_rollback_mode=etcd-only" \
+#      --limit k8s_masters
+#
+# 4. 드라이런 모드:
+#    ansible-playbook -i inventory/hosts rollback-playbook.yml \
+#      -e "k8s_backup_timestamp=1703123456" \
+#      -e "k8s_dry_run=true"
+#
+# 5. 강제 롤백 (확인 없이):
+#    ansible-playbook -i inventory/hosts rollback-playbook.yml \
+#      -e "k8s_backup_timestamp=1703123456" \
+#      -e "k8s_require_confirmation=false" 

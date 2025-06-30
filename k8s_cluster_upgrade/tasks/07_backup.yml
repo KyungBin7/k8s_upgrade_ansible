@@ -194,6 +194,29 @@
       백업 디렉토리: {{ k8s_current_backup_dir }}
     dest: "{{ k8s_current_backup_dir }}/backup-info.txt"
 
+# 백업 타임스탬프 출력
+- name: "백업 완료 - 타임스탬프 기록"
+  debug:
+    msg:
+      - "=================================================="
+      - "✅ 백업이 완료되었습니다!"
+      - "📁 백업 위치: {{ k8s_current_backup_dir }}"
+      - "🕒 백업 타임스탬프: {{ ansible_date_time.epoch }}"
+      - "📅 백업 시간: {{ ansible_date_time.iso8601 }}"
+      - "=================================================="
+      - "롤백 시 다음과 같이 사용하세요:"
+      - "ansible-playbook -i inventory/hosts rollback-playbook.yml \\"
+      - "  -e \"k8s_backup_timestamp={{ ansible_date_time.epoch }}\""
+      - "=================================================="
+
+# 백업 타임스탬프를 파일로도 저장
+- name: "백업 타임스탬프 파일 저장"
+  copy:
+    content: "{{ ansible_date_time.epoch }}"
+    dest: "/tmp/k8s_last_backup_timestamp"
+  delegate_to: localhost
+  run_once: true
+
 # 이전 백업 정리
 - name: "오래된 백업 찾기"
   find:

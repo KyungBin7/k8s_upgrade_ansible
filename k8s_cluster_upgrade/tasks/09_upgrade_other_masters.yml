@@ -5,22 +5,32 @@
   debug:
     msg: "추가 컨트롤 플레인 노드 {{ inventory_hostname }}의 업그레이드를 시작합니다"
 
-# 첫 번째 마스터 노드가 업그레이드 완료될 때까지 대기
-- name: "첫 번째 마스터 노드 업그레이드 완료 대기"
-  wait_for:
-    timeout: "{{ k8s_upgrade_timeout }}"
+# 첫 번째 마스터 노드 업그레이드 완료 확인
+- name: "첫 번째 마스터 노드 kubelet 버전 확인"
+  shell: |
+    kubelet --version | awk '{print $2}' | sed 's/v//'
+  register: first_master_version
   delegate_to: "{{ groups['k8s_masters'][0] | default(groups['all'][0]) }}"
-  run_once: true
+  until: first_master_version.stdout == k8s_target_version
+  retries: "{{ (k8s_upgrade_timeout / 30) | int }}"
+  delay: 30
+  when: groups['k8s_masters'] | length > 1
 
-- name: "API 서버 연결 확인"
-  uri:
-    url: "https://{{ hostvars[groups['k8s_masters'][0] | default(groups['all'][0])]['ansible_default_ipv4']['address'] }}:6443/version"
-    method: GET
-    validate_certs: false
-    status_code: 200
+- name: "첫 번째 마스터 노드 업그레이드 완료 확인"
+  debug:
+    msg: "첫 번째 마스터 노드가 {{ first_master_version.stdout }} 버전으로 업그레이드 완료되었습니다"
+  when: 
+    - groups['k8s_masters'] | length > 1
+    - first_master_version is defined
+
+- name: "API 서버 연결 및 클러스터 상태 확인"
+  shell: |
+    kubectl cluster-info
+  register: api_check
+  until: api_check.rc == 0
   retries: 30
   delay: 10
-  register: api_check
+  delegate_to: "{{ groups['k8s_masters'][0] | default(groups['all'][0]) }}"
 
 # 실제 Kubernetes 노드 이름 확인
 - name: "실제 Kubernetes 노드 이름 확인"

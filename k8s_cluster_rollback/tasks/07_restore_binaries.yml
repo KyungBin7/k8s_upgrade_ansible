@@ -1,0 +1,230 @@
+---
+# 바이너리 파일 복원
+
+- name: "바이너리 복원 시작"
+  debug:
+    msg: "Kubernetes 바이너리 파일 복원을 시작합니다."
+
+# 백업된 바이너리 디렉토리 확인
+- name: "백업된 바이너리 디렉토리 확인"
+  stat:
+    path: "{{ k8s_rollback_files.binaries_dir }}"
+  register: backup_binaries_dir_stat
+  failed_when: not backup_binaries_dir_stat.stat.exists
+
+# 백업된 바이너리 파일 목록 확인
+- name: "백업된 바이너리 파일 목록 확인"
+  find:
+    paths: "{{ k8s_rollback_files.binaries_dir }}"
+    patterns: "{{ k8s_backup_binaries }}"
+  register: backup_binaries_found
+
+- name: "백업된 바이너리 목록 표시"
+  debug:
+    msg: "발견된 바이너리: {{ backup_binaries_found.files | map(attribute='path') | map('basename') | list }}"
+
+# 현재 바이너리 백업 (선택적)
+- name: "현재 바이너리 백업"
+  copy:
+    src: "{{ k8s_bin_dir }}/{{ item }}"
+    dest: "{{ k8s_temp_dirs.backup_current }}/{{ item }}-current"
+    remote_src: yes
+    mode: preserve
+  loop: "{{ k8s_backup_binaries }}"
+  when: 
+    - not k8s_dry_run | default(false)
+    - k8s_backup_before_rollback | default(false)
+  ignore_errors: true
+
+# 바이너리 파일 복원
+- name: "Kubernetes 바이너리 복원"
+  copy:
+    src: "{{ k8s_rollback_files.binaries_dir }}/{{ item }}"
+    dest: "{{ k8s_bin_dir }}/{{ item }}"
+    remote_src: yes
+    mode: '0755'
+    owner: root
+    group: root
+  loop: "{{ k8s_backup_binaries }}"
+  when: not k8s_dry_run | default(false)
+  register: binary_restore_result
+
+- name: "바이너리 복원 결과 표시"
+  debug:
+    msg: "{{ item.item }}: {{ '복원됨' if item.changed else '이미 존재' }}"
+  loop: "{{ binary_restore_result.results }}"
+  when: 
+    - not k8s_dry_run | default(false)
+    - binary_restore_result is defined
+  loop_control:
+    label: "{{ item.item }}"
+
+# 복원된 바이너리 검증
+- name: "복원된 바이너리 실행 가능성 확인"
+  shell: "{{ k8s_bin_dir }}/{{ item }} --version"
+  register: binary_version_check
+  loop: "{{ k8s_backup_binaries }}"
+  ignore_errors: true
+  changed_when: false
+
+- name: "복원된 바이너리 버전 표시"
+  debug:
+    msg: "{{ item.item }}: {{ item.stdout.split('\\n')[0] if item.rc == 0 else '실행 실패' }}"
+  loop: "{{ binary_version_check.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+# systemd 서비스 파일 복원
+- name: "systemd 서비스 파일 백업 확인"
+  stat:
+    path: "{{ k8s_rollback_files.systemd_dir }}"
+  register: backup_systemd_dir_stat
+
+- name: "systemd 서비스 파일 목록 확인"
+  find:
+    paths: "{{ k8s_rollback_files.systemd_dir }}"
+    patterns: "*.service,*.conf"
+  register: backup_systemd_files
+  when: backup_systemd_dir_stat.stat.exists
+
+- name: "systemd 서비스 파일 복원"
+  copy:
+    src: "{{ item.path }}"
+    dest: "{{ k8s_systemd_dir }}/{{ item.path | basename }}"
+    remote_src: yes
+    mode: '0644'
+    owner: root
+    group: root
+  loop: "{{ backup_systemd_files.files }}"
+  when: 
+    - not k8s_dry_run | default(false)
+    - backup_systemd_dir_stat.stat.exists
+  notify: systemd_reload
+
+# systemd 데몬 리로드
+- name: "systemd 데몬 리로드"
+  systemd:
+    daemon_reload: yes
+  when: not k8s_dry_run | default(false)
+
+# kubelet 설정 디렉토리 생성 (필요시)
+- name: "kubelet 설정 디렉토리 생성"
+  file:
+    path: "{{ item }}"
+    state: directory
+    mode: '0755'
+  loop:
+    - "/var/lib/kubelet"
+    - "/etc/systemd/system/kubelet.service.d"
+  when: not k8s_dry_run | default(false)
+
+# kubeadm 설정 파일 복원 (있는 경우)
+- name: "kubeadm 설정 파일 확인"
+  find:
+    paths: "{{ k8s_rollback_files.systemd_dir }}"
+    patterns: "*kubeadm*"
+  register: kubeadm_config_files
+  when: backup_systemd_dir_stat.stat.exists
+
+- name: "kubeadm 설정 파일 복원"
+  copy:
+    src: "{{ item.path }}"
+    dest: "/etc/systemd/system/kubelet.service.d/{{ item.path | basename }}"
+    remote_src: yes
+    mode: '0644'
+  loop: "{{ kubeadm_config_files.files }}"
+  when: 
+    - not k8s_dry_run | default(false)
+    - backup_systemd_dir_stat.stat.exists
+    - kubeadm_config_files.files | length > 0
+
+# 바이너리 심볼릭 링크 생성 (필요시)
+- name: "시스템 PATH에 심볼릭 링크 생성"
+  file:
+    src: "{{ k8s_bin_dir }}/{{ item }}"
+    dest: "/usr/bin/{{ item }}"
+    state: link
+    force: yes
+  loop: "{{ k8s_backup_binaries }}"
+  when: 
+    - not k8s_dry_run | default(false)
+    - k8s_bin_dir != "/usr/bin"
+  ignore_errors: true
+
+# 복원된 바이너리 최종 검증
+- name: "복원된 바이너리 최종 검증"
+  shell: |
+    echo "=== {{ item }} 바이너리 정보 ==="
+    file {{ k8s_bin_dir }}/{{ item }}
+    ls -la {{ k8s_bin_dir }}/{{ item }}
+    {{ k8s_bin_dir }}/{{ item }} --version 2>/dev/null | head -1 || echo "버전 확인 실패"
+  register: binary_final_check
+  loop: "{{ k8s_backup_binaries }}"
+  ignore_errors: true
+  changed_when: false
+
+- name: "바이너리 검증 결과 표시"
+  debug:
+    msg: "{{ item.stdout_lines }}"
+  loop: "{{ binary_final_check.results }}"
+  loop_control:
+    label: "{{ item.item }}"
+
+# 드라이런 모드 메시지
+- name: "바이너리 복원 계획 (드라이런)"
+  debug:
+    msg:
+      - "=== 바이너리 복원 계획 (드라이런 모드) ==="
+      - "복원 소스: {{ k8s_rollback_files.binaries_dir }}"
+      - "복원 대상: {{ k8s_bin_dir }}"
+      - "복원할 바이너리:"
+      - "{{ backup_binaries_found.files | map(attribute='path') | map('basename') | list }}"
+      - "systemd 서비스 파일도 함께 복원됩니다."
+  when: k8s_dry_run | default(false)
+
+# 바이너리 복원 오류 처리
+- name: "바이너리 복원 실패 시 복구"
+  block:
+    - name: "손상된 바이너리 제거"
+      file:
+        path: "{{ k8s_bin_dir }}/{{ item }}"
+        state: absent
+      loop: "{{ k8s_backup_binaries }}"
+
+    - name: "백업된 현재 바이너리 복원 (있는 경우)"
+      copy:
+        src: "{{ k8s_temp_dirs.backup_current }}/{{ item }}-current"
+        dest: "{{ k8s_bin_dir }}/{{ item }}"
+        remote_src: yes
+        mode: '0755'
+      loop: "{{ k8s_backup_binaries }}"
+      when: k8s_backup_before_rollback | default(false)
+      ignore_errors: true
+
+  rescue:
+    - name: "바이너리 복원 복구 실패"
+      debug:
+        msg: "바이너리 복원 복구에 실패했습니다. 수동 개입이 필요합니다."
+
+  when: 
+    - not k8s_dry_run | default(false)
+    - binary_restore_result is defined
+    - binary_restore_result.failed | default(false)
+    - k8s_enable_recovery_mode | default(true)
+
+# 복원 완료 상태 업데이트
+- name: "바이너리 복원 상태 업데이트"
+  lineinfile:
+    path: "{{ k8s_status_files.rollback_state }}"
+    line: "바이너리 복원: 완료 ({{ ansible_date_time.iso8601 }})"
+    create: yes
+  when: not k8s_dry_run | default(false)
+
+- name: "바이너리 복원 완료"
+  debug:
+    msg:
+      - "=== 바이너리 복원 완료 ==="
+      - "복원된 바이너리: {{ k8s_backup_binaries | join(', ') }}"
+      - "설치 위치: {{ k8s_bin_dir }}"
+      - "systemd 서비스 파일: 복원됨"
+      - "상태: 완료" 

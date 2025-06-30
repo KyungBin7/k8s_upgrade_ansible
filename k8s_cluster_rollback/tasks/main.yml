@@ -1,0 +1,151 @@
+---
+# Kubernetes 클러스터 롤백 메인 태스크
+
+- name: "롤백 시작"
+  debug:
+    msg: 
+      - "=== Kubernetes 클러스터 롤백 시작 ==="
+      - "백업 타임스탬프: {{ k8s_backup_timestamp }}"
+      - "롤백 모드: {{ k8s_rollback_mode }}"
+      - "롤백 전략: {{ k8s_rollback_strategy }}"
+      - "호스트: {{ inventory_hostname }}"
+
+# 필수 변수 확인
+- name: "필수 변수 확인"
+  assert:
+    that:
+      - k8s_backup_timestamp is defined
+      - k8s_backup_timestamp != ""
+    fail_msg: "k8s_backup_timestamp 변수가 설정되지 않았습니다. 복원할 백업의 타임스탬프를 지정해주세요."
+    success_msg: "필수 변수 확인 완료"
+
+# 백업 소스 디렉토리 설정
+- name: "백업 소스 디렉토리 설정"
+  set_fact:
+    k8s_backup_source_dir: "{{ k8s_backup_dir }}/{{ k8s_backup_timestamp }}"
+
+# 1단계: 백업 검증 및 사전 검사
+- name: "1단계: 백업 검증 및 사전 검사"
+  include_tasks: 01_verify_backup.yml
+  tags: 
+    - rollback
+    - verify
+    - preflight
+
+# 2단계: 노드 역할 및 환경 감지
+- name: "2단계: 노드 역할 및 환경 감지"
+  include_tasks: 02_detect_environment.yml
+  tags:
+    - rollback
+    - detect
+    - preparation
+
+# 3단계: 현재 상태 백업 (선택적)
+- name: "3단계: 현재 상태 백업 (선택적)"
+  include_tasks: 03_backup_current_state.yml
+  when: k8s_backup_before_rollback | default(false)
+  tags:
+    - rollback
+    - backup-current
+    - preparation
+
+# 4단계: 클러스터 서비스 중지 및 준비
+- name: "4단계: 클러스터 서비스 중지 및 준비"
+  include_tasks: 04_prepare_rollback.yml
+  tags:
+    - rollback
+    - preparation
+    - shutdown
+
+# 5단계: etcd 복원 (마스터 노드)
+- name: "5단계: etcd 복원 (마스터 노드)"
+  include_tasks: 05_restore_etcd.yml
+  when: 
+    - k8s_detected_role == "master"
+    - k8s_is_first_master | default(false)
+    - k8s_restore_etcd | default(true)
+    - k8s_rollback_mode in ["full", "etcd-only"]
+  tags:
+    - rollback
+    - restore
+    - etcd
+
+# 6단계: 설정 파일 복원
+- name: "6단계: 설정 파일 복원"
+  include_tasks: 06_restore_configs.yml
+  when: 
+    - k8s_restore_configs | default(true)
+    - k8s_rollback_mode in ["full", "config-only"]
+  tags:
+    - rollback
+    - restore
+    - configs
+
+# 7단계: 바이너리 파일 복원
+- name: "7단계: 바이너리 파일 복원"
+  include_tasks: 07_restore_binaries.yml
+  when: 
+    - k8s_restore_binaries | default(true)
+    - k8s_rollback_mode in ["full", "binary-only"]
+  tags:
+    - rollback
+    - restore
+    - binaries
+
+# 8단계: 패키지 다운그레이드 (선택적)
+- name: "8단계: 패키지 다운그레이드 (선택적)"
+  include_tasks: 08_restore_packages.yml
+  when: 
+    - k8s_restore_packages | default(false)
+    - k8s_package_downgrade_allowed | default(false)
+    - k8s_detected_package_manager != "binary"
+  tags:
+    - rollback
+    - restore
+    - packages
+
+# 9단계: 서비스 재시작
+- name: "9단계: 서비스 재시작"
+  include_tasks: 09_restart_services.yml
+  tags:
+    - rollback
+    - restart
+    - services
+
+# 10단계: 클러스터 상태 검증
+- name: "10단계: 클러스터 상태 검증"
+  include_tasks: 10_verify_rollback.yml
+  when: k8s_verify_rollback | default(true)
+  tags:
+    - rollback
+    - verify
+    - validation
+
+# 11단계: 정리 및 완료
+- name: "11단계: 정리 및 완료"
+  include_tasks: 11_cleanup.yml
+  tags:
+    - rollback
+    - cleanup
+    - finalize
+
+# 롤백 완료 메시지
+- name: "롤백 완료"
+  debug:
+    msg:
+      - "=== Kubernetes 클러스터 롤백 완료 ==="
+      - "호스트: {{ inventory_hostname }}"
+      - "백업 타임스탬프: {{ k8s_backup_timestamp }}"
+      - "롤백 모드: {{ k8s_rollback_mode }}"
+      - "완료 시간: {{ ansible_date_time.iso8601 }}"
+      - "로그 파일: {{ k8s_log_file }}"
+  tags: always
+
+# 오류 처리를 위한 rescue 블록
+- name: "롤백 실패 처리"
+  debug:
+    msg: 
+      - "=== 롤백 실패 ==="
+      - "복구 모드가 활성화된 경우 복구를 시도합니다."
+      - "자세한 내용은 로그 파일을 확인하세요: {{ k8s_log_file }}"
+  when: ansible_failed_task is defined 

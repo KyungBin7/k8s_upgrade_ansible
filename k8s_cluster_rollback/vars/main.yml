@@ -1,0 +1,213 @@
+---
+# 롤백할 백업 파일 목록
+k8s_rollback_files:
+  etcd_snapshot: "{{ k8s_backup_source_dir }}/etcd-snapshot.db"
+  config_archive: "{{ k8s_backup_source_dir }}/kubernetes.tar.gz"
+  etcd_archive: "{{ k8s_backup_source_dir }}/etcd.tar.gz"
+  kubelet_archive: "{{ k8s_backup_source_dir }}/kubelet.tar.gz"
+  binaries_dir: "{{ k8s_backup_source_dir }}/binaries"
+  systemd_dir: "{{ k8s_backup_source_dir }}/systemd"
+  cluster_state_dir: "{{ k8s_backup_source_dir }}/cluster-state"
+  backup_info: "{{ k8s_backup_source_dir }}/backup-info.txt"
+  package_info: "{{ k8s_backup_source_dir }}/package-info.txt"
+
+# 노드 역할 감지를 위한 파일 경로들
+k8s_master_indicators:
+  - "{{ k8s_config_dir }}/admin.conf"
+  - "{{ k8s_config_dir }}/controller-manager.conf"
+  - "{{ k8s_config_dir }}/scheduler.conf"
+  - "/var/lib/etcd"
+
+# 클러스터 서비스 중지 순서 (역순으로 중지)
+k8s_service_stop_order:
+  master:
+    - kubelet
+    - kube-proxy
+    - kube-scheduler
+    - kube-controller-manager
+    - kube-apiserver
+    - etcd
+  worker:
+    - kubelet
+    - kube-proxy
+
+# 클러스터 서비스 시작 순서
+k8s_service_start_order:
+  master:
+    - etcd
+    - kube-apiserver
+    - kube-controller-manager
+    - kube-scheduler
+    - kube-proxy
+    - kubelet
+  worker:
+    - kube-proxy
+    - kubelet
+
+# 패키지 관리자별 설정
+k8s_package_managers:
+  yum:
+    downgrade_cmd: "yum downgrade -y"
+    list_cmd: "yum list installed"
+    hold_cmd: "yum versionlock"
+    unhold_cmd: "yum versionlock delete"
+  apt:
+    downgrade_cmd: "apt-get install -y --allow-downgrades"
+    list_cmd: "dpkg -l"
+    hold_cmd: "apt-mark hold"
+    unhold_cmd: "apt-mark unhold"
+
+# 중요 디렉토리 백업 경로 매핑
+k8s_directory_mappings:
+  "/etc/kubernetes": "{{ k8s_backup_source_dir }}/kubernetes.tar.gz"
+  "/var/lib/etcd": "{{ k8s_backup_source_dir }}/etcd.tar.gz"
+  "/var/lib/kubelet": "{{ k8s_backup_source_dir }}/kubelet.tar.gz"
+
+# 롤백 단계별 태스크 목록
+k8s_rollback_tasks:
+  verification:
+    - "백업 존재 확인"
+    - "백업 무결성 검증"
+    - "현재 클러스터 상태 확인"
+    - "롤백 사전 검사"
+  preparation:
+    - "노드 역할 감지"
+    - "패키지 관리자 감지"
+    - "현재 상태 백업 (선택적)"
+    - "드레인 수행 (워커 노드)"
+  shutdown:
+    - "클러스터 서비스 중지"
+    - "컨테이너 런타임 중지"
+    - "네트워크 인터페이스 정리"
+  restore:
+    - "etcd 데이터 복원"
+    - "설정 파일 복원"
+    - "바이너리 파일 복원"
+    - "systemd 서비스 파일 복원"
+    - "패키지 다운그레이드 (선택적)"
+  restart:
+    - "컨테이너 런타임 시작"
+    - "클러스터 서비스 시작"
+    - "노드 언코든"
+  verification_final:
+    - "클러스터 상태 검증"
+    - "서비스 상태 확인"
+    - "네트워크 연결 테스트"
+    - "API 서버 응답 확인"
+
+# 상태 체크를 위한 명령어들
+k8s_health_checks:
+  etcd_health: |
+    ETCDCTL_API=3 etcdctl endpoint health \
+      --endpoints=https://127.0.0.1:2379 \
+      --cacert={{ k8s_config_dir }}/pki/etcd/ca.crt \
+      --cert={{ k8s_config_dir }}/pki/etcd/server.crt \
+      --key={{ k8s_config_dir }}/pki/etcd/server.key
+  api_server: "kubectl cluster-info"
+  nodes_ready: "kubectl get nodes --no-headers | grep -v Ready | wc -l"
+  pods_running: "kubectl get pods --all-namespaces --field-selector=status.phase!=Running --no-headers | wc -l"
+  cluster_version: "kubectl version --short"
+
+# 롤백 모드별 수행 작업
+k8s_rollback_mode_tasks:
+  full:
+    - etcd_restore
+    - config_restore
+    - binary_restore
+    - service_restart
+  binary-only:
+    - binary_restore
+    - service_restart
+  config-only:
+    - config_restore
+    - service_restart
+  etcd-only:
+    - etcd_restore
+    - service_restart
+
+# 컨테이너 런타임별 설정
+k8s_container_runtimes:
+  containerd:
+    service_name: "containerd"
+    config_file: "/etc/containerd/config.toml"
+    socket_path: "/run/containerd/containerd.sock"
+  cri-o:
+    service_name: "crio"
+    config_file: "/etc/crio/crio.conf"
+    socket_path: "/var/run/crio/crio.sock"
+  docker:
+    service_name: "docker"
+    config_file: "/etc/docker/daemon.json"
+    socket_path: "/var/run/docker.sock"
+
+# 임시 디렉토리 설정
+k8s_temp_dirs:
+  base: "/tmp/k8s-rollback"
+  restore: "/tmp/k8s-rollback/restore"
+  backup_current: "/tmp/k8s-rollback/current-backup"
+  logs: "/tmp/k8s-rollback/logs"
+
+# 롤백 후 검증 테스트
+k8s_verification_tests:
+  basic:
+    - name: "API 서버 응답"
+      command: "kubectl cluster-info"
+      expected_rc: 0
+    - name: "노드 상태"
+      command: "kubectl get nodes"
+      expected_rc: 0
+    - name: "시스템 파드"
+      command: "kubectl get pods -n kube-system"
+      expected_rc: 0
+  advanced:
+    - name: "DNS 해상도"
+      command: "nslookup kubernetes.default.svc.cluster.local"
+      expected_rc: 0
+    - name: "서비스 네트워킹"
+      command: "kubectl run test-pod --image=busybox --restart=Never --rm -i --timeout=60s -- nslookup kubernetes.default.svc.cluster.local"
+      expected_rc: 0
+
+# 에러 복구 전략
+k8s_recovery_strategies:
+  etcd_restore_failed:
+    - "etcd 서비스 중지"
+    - "etcd 데이터 디렉토리 정리"
+    - "스냅샷 재복원"
+    - "etcd 서비스 재시작"
+  api_server_failed:
+    - "API 서버 설정 파일 확인"
+    - "인증서 권한 확인" 
+    - "API 서버 재시작"
+  network_failed:
+    - "CNI 설정 확인"
+    - "네트워크 인터페이스 재설정"
+    - "파드 네트워크 재시작"
+
+# 롤백 상태 파일
+k8s_status_files:
+  rollback_state: "/var/lib/k8s-rollback-state"
+  rollback_log: "{{ k8s_log_file }}"
+  rollback_summary: "/var/lib/k8s-rollback-summary"
+
+# 알림 템플릿
+k8s_notification_templates:
+  success: |
+    Kubernetes 클러스터 롤백 완료
+    호스트: {{ inventory_hostname }}
+    백업 타임스탬프: {{ k8s_backup_timestamp }}
+    롤백 모드: {{ k8s_rollback_mode }}
+    완료 시간: {{ ansible_date_time.iso8601 }}
+  failure: |
+    Kubernetes 클러스터 롤백 실패
+    호스트: {{ inventory_hostname }}
+    백업 타임스탬프: {{ k8s_backup_timestamp }}
+    오류: {{ rollback_error | default('Unknown') }}
+    실패 시간: {{ ansible_date_time.iso8601 }}
+
+# 기본 타임아웃 설정
+k8s_default_timeouts:
+  service_stop: 60
+  service_start: 120
+  etcd_restore: 300
+  file_copy: 180
+  health_check: 30 
