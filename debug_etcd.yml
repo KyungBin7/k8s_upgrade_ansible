@@ -1,0 +1,212 @@
+---
+# etcd 클러스터 디버깅 전용 플레이북
+- name: "etcd 클러스터 종합 디버깅"
+  hosts: all
+  become: yes
+  gather_facts: yes
+  vars:
+    k8s_config_dir: "/etc/kubernetes"
+    etcd_timeout: 30
+  
+  tasks:
+    - name: "기본 노드 정보 수집"
+      debug:
+        msg:
+          - "호스트명: {{ inventory_hostname }}"
+          - "IP 주소: {{ ansible_default_ipv4.address }}"
+          - "OS: {{ ansible_distribution }} {{ ansible_distribution_version }}"
+    
+    - name: "Kubernetes 설정 디렉토리 확인"
+      stat:
+        path: "{{ k8s_config_dir }}"
+      register: k8s_config_stat
+    
+    - name: "etcd 인증서 파일 확인"
+      stat:
+        path: "{{ item }}"
+      register: etcd_certs_stat
+      loop:
+        - "{{ k8s_config_dir }}/pki/etcd/ca.crt"
+        - "{{ k8s_config_dir }}/pki/etcd/server.crt"
+        - "{{ k8s_config_dir }}/pki/etcd/server.key"
+        - "{{ k8s_config_dir }}/pki/etcd/peer.crt"
+        - "{{ k8s_config_dir }}/pki/etcd/peer.key"
+    
+    - name: "etcd 인증서 상태 출력"
+      debug:
+        msg: "{{ item.item }}: {{ 'EXIST' if item.stat.exists else 'MISSING' }}"
+      loop: "{{ etcd_certs_stat.results }}"
+      loop_control:
+        label: "{{ item.item }}"
+    
+    - name: "etcd 서비스 상태 확인"
+      command: systemctl status etcd
+      register: etcd_service_status
+      ignore_errors: true
+      changed_when: false
+    
+    - name: "etcd 서비스 상태 출력"
+      debug:
+        var: etcd_service_status
+    
+    - name: "etcd 프로세스 확인"
+      shell: ps aux | grep etcd | grep -v grep
+      register: etcd_process
+      ignore_errors: true
+      changed_when: false
+    
+    - name: "etcd 프로세스 출력"
+      debug:
+        var: etcd_process.stdout_lines
+    
+    - name: "etcd 포트 확인"
+      wait_for:
+        port: "{{ item }}"
+        host: "127.0.0.1"
+        timeout: 5
+      register: etcd_ports
+      ignore_errors: true
+      loop:
+        - 2379  # client port
+        - 2380  # peer port
+    
+    - name: "etcd 포트 상태 출력"
+      debug:
+        msg: "포트 {{ item.item }}: {{ 'OPEN' if not item.failed else 'CLOSED' }}"
+      loop: "{{ etcd_ports.results }}"
+      loop_control:
+        label: "포트 {{ item.item }}"
+    
+    # etcd 클러스터 멤버 확인 (상세)
+    - name: "etcd 클러스터 멤버 상세 정보"
+      shell: |
+        timeout {{ etcd_timeout }} bash -c '
+        ETCDCTL_API=3 etcdctl member list \
+          --endpoints=https://127.0.0.1:2379 \
+          --cacert={{ k8s_config_dir }}/pki/etcd/ca.crt \
+          --cert={{ k8s_config_dir }}/pki/etcd/server.crt \
+          --key={{ k8s_config_dir }}/pki/etcd/server.key \
+          --write-out=table'
+      register: etcd_member_detail
+      when: k8s_config_stat.stat.exists
+      ignore_errors: true
+      changed_when: false
+    
+    - name: "etcd 멤버 상세 정보 출력"
+      debug:
+        var: etcd_member_detail.stdout_lines
+      when: 
+        - etcd_member_detail is defined
+        - etcd_member_detail.rc == 0
+    
+    # etcd health 상세 확인
+    - name: "etcd 엔드포인트 health 확인"
+      shell: |
+        timeout {{ etcd_timeout }} bash -c '
+        ETCDCTL_API=3 etcdctl endpoint health \
+          --endpoints=https://127.0.0.1:2379 \
+          --cacert={{ k8s_config_dir }}/pki/etcd/ca.crt \
+          --cert={{ k8s_config_dir }}/pki/etcd/server.crt \
+          --key={{ k8s_config_dir }}/pki/etcd/server.key'
+      register: etcd_health_detail
+      when: k8s_config_stat.stat.exists
+      ignore_errors: true
+      changed_when: false
+    
+    - name: "etcd health 상세 결과 출력"
+      debug:
+        var: etcd_health_detail
+      when: etcd_health_detail is defined
+    
+    # etcd 데이터베이스 상태
+    - name: "etcd 데이터베이스 상태 확인"
+      shell: |
+        timeout {{ etcd_timeout }} bash -c '
+        ETCDCTL_API=3 etcdctl endpoint status \
+          --endpoints=https://127.0.0.1:2379 \
+          --cacert={{ k8s_config_dir }}/pki/etcd/ca.crt \
+          --cert={{ k8s_config_dir }}/pki/etcd/server.crt \
+          --key={{ k8s_config_dir }}/pki/etcd/server.key \
+          --write-out=json'
+      register: etcd_db_status
+      when: k8s_config_stat.stat.exists
+      ignore_errors: true
+      changed_when: false
+    
+    - name: "etcd 데이터베이스 상태 출력"
+      debug:
+        msg: "{{ etcd_db_status.stdout | from_json if etcd_db_status.rc == 0 else etcd_db_status.stderr }}"
+      when: etcd_db_status is defined
+    
+    # etcd 로그 확인
+    - name: "etcd 최근 로그 확인"
+      shell: journalctl -u etcd --no-pager -l -n 50
+      register: etcd_logs
+      ignore_errors: true
+      changed_when: false
+    
+    - name: "etcd 로그 출력"
+      debug:
+        var: etcd_logs.stdout_lines
+      when: etcd_logs.rc == 0
+    
+    # 네트워크 연결 확인
+    - name: "etcd 클러스터 내 다른 노드 연결 확인"
+      shell: |
+        timeout 10 bash -c '
+        if command -v etcdctl >/dev/null 2>&1; then
+          ETCDCTL_API=3 etcdctl member list \
+            --endpoints=https://127.0.0.1:2379 \
+            --cacert={{ k8s_config_dir }}/pki/etcd/ca.crt \
+            --cert={{ k8s_config_dir }}/pki/etcd/server.crt \
+            --key={{ k8s_config_dir }}/pki/etcd/server.key | \
+          awk -F"," "{print \$5}" | sed "s/.*=//g" | while read endpoint; do
+            echo "Testing connection to: $endpoint"
+            nc -z -w 3 $(echo $endpoint | cut -d: -f1) $(echo $endpoint | cut -d: -f2) && echo "$endpoint: OK" || echo "$endpoint: FAILED"
+          done
+        else
+          echo "etcdctl not found"
+        fi'
+      register: etcd_network_test
+      when: k8s_config_stat.stat.exists
+      ignore_errors: true
+      changed_when: false
+    
+    - name: "etcd 네트워크 테스트 결과"
+      debug:
+        var: etcd_network_test.stdout_lines
+      when: 
+        - etcd_network_test is defined
+        - etcd_network_test.stdout_lines is defined
+    
+    # 디스크 용량 확인
+    - name: "etcd 데이터 디렉토리 용량 확인"
+      shell: |
+        etcd_dir=$(ps aux | grep etcd | grep -o '\--data-dir[= ][^ ]*' | head -1 | cut -d= -f2 || echo "/var/lib/etcd")
+        if [ -d "$etcd_dir" ]; then
+          echo "etcd 데이터 디렉토리: $etcd_dir"
+          df -h "$etcd_dir"
+          echo "데이터 디렉토리 크기:"
+          du -sh "$etcd_dir" 2>/dev/null || echo "접근 권한 없음"
+        else
+          echo "etcd 데이터 디렉토리를 찾을 수 없습니다: $etcd_dir"
+        fi
+      register: etcd_disk_usage
+      ignore_errors: true
+      changed_when: false
+    
+    - name: "etcd 디스크 사용량 출력"
+      debug:
+        var: etcd_disk_usage.stdout_lines
+    
+    # 요약 정보
+    - name: "etcd 클러스터 상태 요약"
+      debug:
+        msg:
+          - "=== etcd 클러스터 상태 요약 ==="
+          - "노드: {{ inventory_hostname }}"
+          - "etcd 서비스: {{ 'RUNNING' if etcd_service_status.rc == 0 else 'STOPPED' }}"
+          - "포트 2379: {{ 'OPEN' if not etcd_ports.results[0].failed else 'CLOSED' }}"
+          - "포트 2380: {{ 'OPEN' if not etcd_ports.results[1].failed else 'CLOSED' }}"
+          - "클러스터 연결: {{ 'OK' if etcd_member_detail.rc == 0 else 'FAILED' }}"
+          - "Health 상태: {{ 'OK' if etcd_health_detail.rc == 0 else 'FAILED' }}" 

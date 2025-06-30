@@ -57,4 +57,8 @@ k8s_upgrade_kube_proxy: true
 
 # 보안 설정
 k8s_certificate_renewal: true
-k8s_skip_certificate_verification: false 
+k8s_skip_certificate_verification: false
+
+# etcd health 체크 설정
+k8s_etcd_health_strict: false  # true로 설정하면 etcd health 실패 시 업그레이드 중단
+k8s_etcd_health_timeout: 30    # etcd health 체크 타임아웃 (초) 
