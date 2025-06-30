@@ -132,6 +132,121 @@
     mode: '0755'
   when: k8s_backup_enabled
 
+# etcd 클러스터 health 체크 (마스터 노드만)
+- name: "etcd 클러스터 멤버 리스트 확인"
+  shell: |
+    timeout {{ k8s_etcd_health_timeout }} bash -c '
+    ETCDCTL_API=3 etcdctl member list \
+      --endpoints=https://127.0.0.1:2379 \
+      --cacert={{ k8s_config_dir }}/pki/etcd/ca.crt \
+      --cert={{ k8s_config_dir }}/pki/etcd/server.crt \
+      --key={{ k8s_config_dir }}/pki/etcd/server.key'
+  register: etcd_member_list
+  when: 
+    - k8s_detected_role == "master"
+    - k8s_config_dir is defined
+  failed_when: false
+  changed_when: false
+
+- name: "etcd 클러스터 health 상태 확인"
+  shell: |
+    timeout {{ k8s_etcd_health_timeout }} bash -c '
+    ETCDCTL_API=3 etcdctl endpoint health \
+      --endpoints=https://127.0.0.1:2379 \
+      --cacert={{ k8s_config_dir }}/pki/etcd/ca.crt \
+      --cert={{ k8s_config_dir }}/pki/etcd/server.crt \
+      --key={{ k8s_config_dir }}/pki/etcd/server.key'
+  register: etcd_health_check
+  when: 
+    - k8s_detected_role == "master"
+    - k8s_config_dir is defined
+  failed_when: false
+  changed_when: false
+
+- name: "etcd 클러스터 상태 확인"
+  shell: |
+    timeout {{ k8s_etcd_health_timeout }} bash -c '
+    ETCDCTL_API=3 etcdctl endpoint status \
+      --endpoints=https://127.0.0.1:2379 \
+      --cacert={{ k8s_config_dir }}/pki/etcd/ca.crt \
+      --cert={{ k8s_config_dir }}/pki/etcd/server.crt \
+      --key={{ k8s_config_dir }}/pki/etcd/server.key \
+      --write-out=table'
+  register: etcd_status_check
+  when: 
+    - k8s_detected_role == "master"
+    - k8s_config_dir is defined
+  failed_when: false
+  changed_when: false
+
+- name: "etcd 멤버 리스트 결과"
+  debug:
+    msg: 
+      - "=== etcd 클러스터 멤버 리스트 ==="
+      - "{{ etcd_member_list.stdout_lines }}"
+  when: 
+    - k8s_detected_role == "master"
+    - etcd_member_list is defined
+    - etcd_member_list.rc == 0
+
+- name: "etcd health 상태 결과"
+  debug:
+    msg: 
+      - "=== etcd 클러스터 Health 상태 ==="
+      - "{{ etcd_health_check.stdout_lines }}"
+  when: 
+    - k8s_detected_role == "master"
+    - etcd_health_check is defined
+    - etcd_health_check.rc == 0
+
+- name: "etcd 상태 정보 결과"
+  debug:
+    msg: 
+      - "=== etcd 클러스터 상태 정보 ==="
+      - "{{ etcd_status_check.stdout_lines }}"
+  when: 
+    - k8s_detected_role == "master"
+    - etcd_status_check is defined
+    - etcd_status_check.rc == 0
+
+# etcd health 체크 실패 시 경고
+- name: "etcd health 체크 실패 경고"
+  debug:
+    msg: 
+      - "⚠️  경고: etcd health 체크에 실패했습니다!"
+      - "etcd 클러스터가 불안정할 수 있습니다."
+      - "업그레이드를 진행하기 전에 etcd 상태를 확인하세요."
+      - "에러 메시지: {{ etcd_health_check.stderr_lines | default(['N/A']) }}"
+  when: 
+    - k8s_detected_role == "master"
+    - etcd_health_check is defined
+    - etcd_health_check.rc != 0
+
+# etcd 연결 실패 시 경고
+- name: "etcd 연결 실패 경고"
+  debug:
+    msg: 
+      - "⚠️  경고: etcd에 연결할 수 없습니다!"
+      - "etcd 서비스가 실행 중인지 확인하세요."
+      - "인증서 경로가 올바른지 확인하세요."
+  when: 
+    - k8s_detected_role == "master"
+    - etcd_member_list is defined
+    - etcd_member_list.rc != 0
+
+# 심각한 etcd 문제 시 업그레이드 중단 옵션
+- name: "etcd 심각한 문제 발생 시 업그레이드 중단"
+  fail:
+    msg: 
+      - "❌ etcd 클러스터에 심각한 문제가 발생했습니다!"
+      - "업그레이드를 진행할 수 없습니다."
+      - "etcd 문제를 해결한 후 다시 시도하세요."
+  when: 
+    - k8s_detected_role == "master"
+    - k8s_etcd_health_strict | default(false)
+    - etcd_health_check is defined
+    - etcd_health_check.rc != 0
+
 - name: "로그 디렉토리 생성"
   file:
     path: "{{ k8s_log_file | dirname }}"
