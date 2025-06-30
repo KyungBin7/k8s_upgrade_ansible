@@ -22,16 +22,35 @@
   delay: 10
   register: api_check
 
+# 실제 Kubernetes 노드 이름 확인
+- name: "실제 Kubernetes 노드 이름 확인"
+  shell: |
+    kubectl get nodes -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | grep -E "({{ inventory_hostname }}|{{ ansible_hostname }}|{{ ansible_fqdn }})" | head -1
+  register: k8s_node_name_result
+  delegate_to: "{{ groups['k8s_masters'][0] | default(groups['all'][0]) }}"
+  failed_when: false
+  changed_when: false
+
+- name: "Kubernetes 노드 이름 설정"
+  set_fact:
+    k8s_actual_node_name: "{{ k8s_node_name_result.stdout | default(ansible_fqdn) }}"
+
+- name: "사용할 노드 이름 확인"
+  debug:
+    msg: "사용할 Kubernetes 노드 이름: {{ k8s_actual_node_name }}"
+
 # 노드 드레인
 - name: "노드 드레인"
   shell: |
-    kubectl drain {{ inventory_hostname }} \
+    kubectl drain {{ k8s_actual_node_name }} \
       --ignore-daemonsets \
       --delete-emptydir-data \
       --force \
       --timeout={{ k8s_upgrade_drain_timeout }}s
   delegate_to: "{{ groups['k8s_masters'][0] | default(groups['all'][0]) }}"
-  when: not k8s_upgrade_skip_drain
+  when: 
+    - not k8s_upgrade_skip_drain
+    - k8s_actual_node_name | length > 0
   ignore_errors: true
 
 # kubeadm, kubelet, kubectl 업그레이드
@@ -65,37 +84,41 @@
 # 노드 언코든
 - name: "노드 언코든"
   shell: |
-    kubectl uncordon {{ inventory_hostname }}
+    kubectl uncordon {{ k8s_actual_node_name }}
   delegate_to: "{{ groups['k8s_masters'][0] | default(groups['all'][0]) }}"
-  when: not k8s_upgrade_skip_cordon
+  when: 
+    - not k8s_upgrade_skip_cordon
+    - k8s_actual_node_name | length > 0
 
 # 노드 상태 확인
 - name: "노드 Ready 상태 확인"
   shell: |
-    kubectl get node {{ inventory_hostname }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
+    kubectl get node {{ k8s_actual_node_name }} -o jsonpath='{.status.conditions[?(@.type=="Ready")].status}'
   register: node_status
   until: node_status.stdout == "True"
   retries: "{{ k8s_health_check_retries }}"
   delay: "{{ k8s_health_check_delay }}"
   delegate_to: "{{ groups['k8s_masters'][0] | default(groups['all'][0]) }}"
+  when: k8s_actual_node_name | length > 0
 
 # 컨트롤 플레인 컴포넌트 상태 확인
 - name: "컨트롤 플레인 파드 상태 확인"
   shell: |
     kubectl get pods -n kube-system \
       -l tier=control-plane \
-      --field-selector spec.nodeName={{ inventory_hostname }} \
+      --field-selector spec.nodeName={{ k8s_actual_node_name }} \
       -o jsonpath='{.items[*].status.phase}' | grep -v Running | wc -l
   register: control_plane_pods
   until: control_plane_pods.stdout | int == 0
   retries: "{{ k8s_health_check_retries }}"
   delay: "{{ k8s_health_check_delay }}"
   delegate_to: "{{ groups['k8s_masters'][0] | default(groups['all'][0]) }}"
+  when: k8s_actual_node_name | length > 0
 
 # etcd 멤버 상태 확인
 - name: "etcd 멤버 상태 확인"
   shell: |
-    kubectl exec -n kube-system etcd-{{ inventory_hostname }} -- \
+    kubectl exec -n kube-system etcd-{{ k8s_actual_node_name }} -- \
       etcdctl --endpoints=https://127.0.0.1:2379 \
       --cacert=/etc/kubernetes/pki/etcd/ca.crt \
       --cert=/etc/kubernetes/pki/etcd/server.crt \
@@ -104,6 +127,7 @@
   register: etcd_status
   delegate_to: "{{ groups['k8s_masters'][0] | default(groups['all'][0]) }}"
   ignore_errors: true
+  when: k8s_actual_node_name | length > 0
 
 - name: "etcd 상태 결과"
   debug:

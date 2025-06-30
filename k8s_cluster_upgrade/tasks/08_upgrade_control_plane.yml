@@ -65,14 +65,34 @@
     - upgrade_apply_result is defined
     - upgrade_apply_result.rc != 0
 
+# 실제 Kubernetes 노드 이름 확인
+- name: "실제 Kubernetes 노드 이름 확인"
+  shell: |
+    kubectl get nodes -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | grep -E "({{ inventory_hostname }}|{{ ansible_hostname }}|{{ ansible_fqdn }})" | head -1
+  register: k8s_node_name_result
+  when: not k8s_skip_upgrade
+  failed_when: false
+  changed_when: false
+
+- name: "Kubernetes 노드 이름 설정"
+  set_fact:
+    k8s_actual_node_name: "{{ k8s_node_name_result.stdout | default(ansible_fqdn) }}"
+  when: not k8s_skip_upgrade
+
+- name: "사용할 노드 이름 확인"
+  debug:
+    msg: "사용할 Kubernetes 노드 이름: {{ k8s_actual_node_name }}"
+  when: not k8s_skip_upgrade
+
 # 노드 드레인 (다른 노드가 있는 경우)
 - name: "노드 드레인 수행"
-  command: "kubectl drain {{ inventory_hostname }} --ignore-daemonsets --delete-emptydir-data --force --timeout={{ k8s_upgrade_drain_timeout }}s"
+  command: "kubectl drain {{ k8s_actual_node_name }} --ignore-daemonsets --delete-emptydir-data --force --timeout={{ k8s_upgrade_drain_timeout }}s"
   register: drain_result
   when: 
     - not k8s_skip_upgrade
     - not k8s_upgrade_skip_drain
     - groups['all'] | length > 1
+    - k8s_actual_node_name | length > 0
   ignore_errors: true
 
 - name: "노드 드레인 결과"
@@ -119,12 +139,13 @@
 
 # 노드 언코든
 - name: "노드 언코든 수행"
-  command: "kubectl uncordon {{ inventory_hostname }}"
+  command: "kubectl uncordon {{ k8s_actual_node_name }}"
   register: uncordon_result
   when: 
     - not k8s_skip_upgrade
     - not k8s_upgrade_skip_cordon
     - not k8s_upgrade_skip_drain
+    - k8s_actual_node_name | length > 0
   ignore_errors: true
 
 - name: "노드 언코든 결과"
@@ -137,12 +158,14 @@
 
 # 업그레이드 검증
 - name: "노드 상태 확인"
-  command: kubectl get nodes {{ inventory_hostname }}
+  command: kubectl get nodes {{ k8s_actual_node_name }}
   register: node_status
   until: "'Ready' in node_status.stdout"
   retries: "{{ k8s_health_check_retries }}"
   delay: "{{ k8s_health_check_delay }}"
-  when: not k8s_skip_upgrade
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_actual_node_name | length > 0
 
 - name: "컨트롤 플레인 구성 요소 상태 확인"
   uri:
