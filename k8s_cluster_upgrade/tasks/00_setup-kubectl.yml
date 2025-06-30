@@ -2,16 +2,16 @@
 # Kubernetes admin.conf 배포 및 kubectl 설정 플레이북
 # 클러스터 업그레이드 전에 한번만 실행
 # 1. 기본 실행 (모든 노드에 kubectl 설정)
-#ansible-playbook -i inventory/hosts setup-kubectl.yml
+#ansible-playbook -i inventory/hosts k8s_cluster_upgrade/tasks/00_setup-kubectl.yml
 
 # 2. 특정 노드만 실행
-#ansible-playbook -i inventory/hosts setup-kubectl.yml --limit "control_plane,workers"
+#ansible-playbook -i inventory/hosts k8s_cluster_upgrade/tasks/00_setup-kubectl.yml --limit "control_plane,workers"
 
 # 3. 상세 로그와 함께 실행
-#ansible-playbook -i inventory/hosts setup-kubectl.yml -v
+#ansible-playbook -i inventory/hosts k8s_cluster_upgrade/tasks/00_setup-kubectl.yml -v
 
 # 4. 체크 모드로 먼저 확인
-#ansible-playbook -i inventory/hosts setup-kubectl.yml --check
+#ansible-playbook -i inventory/hosts k8s_cluster_upgrade/tasks/00_setup-kubectl.yml --check
 
 - name: "🔧 Kubernetes admin.conf 배포 및 kubectl 설정"
   hosts: all
@@ -60,20 +60,18 @@
         group: root
       when: inventory_hostname != first_master
 
-    # 첫 번째 마스터에서 admin.conf를 로컬로 fetch
-    - name: "📥 첫 번째 마스터에서 admin.conf 가져오기"
-      fetch:
+    # 첫 번째 마스터에서 admin.conf 내용 읽기
+    - name: "📥 첫 번째 마스터에서 admin.conf 내용 읽기"
+      slurp:
         src: "{{ admin_conf_path }}"
-        dest: "/tmp/admin.conf"
-        flat: yes
-      when: inventory_hostname == first_master
+      register: admin_conf_content
       delegate_to: "{{ first_master }}"
       run_once: true
 
     # 다른 노드들에게 admin.conf 복사
     - name: "📤 admin.conf를 다른 노드들에 복사"
       copy:
-        src: "/tmp/admin.conf"
+        content: "{{ admin_conf_content.content | b64decode }}"
         dest: "/root/admin.conf"
         mode: '0644'
         owner: root
@@ -173,15 +171,6 @@
         msg: 
           - "kubectl 연결 테스트 {{ '성공' if kubectl_test.rc == 0 else '실패' }}"
           - "{{ kubectl_test.stdout_lines if kubectl_test.rc == 0 else kubectl_test.stderr_lines }}"
-
-    # 임시 파일 정리 (첫 번째 마스터에서만)
-    - name: "🧹 로컬 임시 파일 정리"
-      file:
-        path: "/tmp/admin.conf"
-        state: absent
-      delegate_to: localhost
-      run_once: true
-      when: inventory_hostname == first_master
 
     # 노드별 admin.conf 임시 파일 정리
     - name: "🧹 노드 임시 파일 정리"
