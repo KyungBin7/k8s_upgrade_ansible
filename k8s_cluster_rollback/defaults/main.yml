@@ -30,15 +30,34 @@ k8s_backup_binaries:
   - kubelet
   - kubeadm
 
+# 임시 디렉토리 설정 (vars에서 정의되지만 기본값도 필요)
+k8s_temp_dirs:
+  base: "/tmp/k8s-rollback"
+  restore: "/tmp/k8s-rollback/restore"
+  backup_current: "/tmp/k8s-rollback/current-backup"
+  logs: "/tmp/k8s-rollback/logs"
+
 # 설정 파일 복원 설정
 k8s_restore_configs: true
 k8s_config_dir: "/etc/kubernetes"
+k8s_kubelet_config_dir: "/var/lib/kubelet"
 k8s_systemd_dir: "/etc/systemd/system"
+
+# 복원할 설정 파일 목록
+k8s_restore_files:
+  - "{{ k8s_config_dir }}/admin.conf"
+  - "{{ k8s_config_dir }}/controller-manager.conf"
+  - "{{ k8s_config_dir }}/scheduler.conf"
+  - "{{ k8s_config_dir }}/kubelet.conf"
+  - "/etc/systemd/system/kubelet.service"
+  - "/etc/systemd/system/kubelet.service.d/10-kubeadm.conf"
 
 # 패키지 복원 설정 (패키지로 설치된 경우)
 k8s_restore_packages: false  # 패키지 다운그레이드는 기본적으로 비활성화
 k8s_package_downgrade_allowed: false
 k8s_detected_package_manager: "auto"  # auto, yum, apt, binary
+k8s_force_package_downgrade: false
+k8s_backup_version: ""  # 백업된 버전 (자동으로 감지됨)
 
 # 서비스 관리
 k8s_services_to_restart:
@@ -46,12 +65,29 @@ k8s_services_to_restart:
   - containerd
   - cri-o
 k8s_restart_in_order: true  # 순서대로 재시작
+k8s_container_runtime: "crio"  # 기본 컨테이너 런타임
+
+# 서비스 재시작 순서
+k8s_service_restart_order:
+  container_runtime:
+    - crio
+    - containerd
+    - docker
+  networking:
+    - flannel
+    - calico-node
+    - weave
+
+# 서비스 안정화 대기 시간
+k8s_service_stabilization_delay: 30
+k8s_restart_networking_services: false
 
 # 검증 설정
 k8s_verify_rollback: true
 k8s_health_check_retries: 30
 k8s_health_check_delay: 10
 k8s_rollback_verification_timeout: 600  # 검증 타임아웃 (초)
+k8s_test_networking_after_rollback: false  # 네트워킹 테스트 수행 여부
 
 # 노드 역할 자동 감지
 k8s_detected_role: ""  # master, worker (자동 감지됨)
@@ -74,6 +110,17 @@ k8s_cni_plugin: "auto"  # auto, flannel, calico, weave
 k8s_cleanup_after_rollback: true
 k8s_remove_temp_files: true
 k8s_update_status_file: true
+k8s_cleanup_rollback_backups: false
+k8s_cleanup_backup_age: "1d"
+k8s_cleanup_container_images: false
+k8s_cleanup_package_cache: false
+k8s_compress_old_logs: false
+k8s_log_compress_age: "7d"
+k8s_log_compress_size: "100m"
+k8s_cleanup_systemd_journal: false
+k8s_journal_retention: "7d"
+k8s_journal_max_size: "500M"
+k8s_cleanup_kubelet_logs: false
 
 # 안전 장치 설정
 k8s_require_confirmation: true  # 대화형 확인 (CI/CD 환경에서는 false)

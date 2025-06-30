@@ -41,7 +41,7 @@
 
 - name: "클러스터 API 서버 응답 확인"
   uri:
-    url: "https://{{ hostvars[groups['k8s_masters'][0]]['ansible_default_ipv4']['address'] }}:6443/healthz"
+    url: "https://{{ hostvars[groups['control_plane'][0]]['ansible_default_ipv4']['address'] }}:6443/healthz"
     method: GET
     validate_certs: no
     status_code: 200
@@ -56,7 +56,7 @@
   shell: |
     kubectl get nodes -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | grep -E "({{ inventory_hostname }}|{{ ansible_hostname }}|{{ ansible_fqdn }})" | head -1
   register: k8s_node_name_result
-  delegate_to: "{{ groups['k8s_masters'][0] }}"
+  delegate_to: "{{ groups['control_plane'][0] }}"
   when: not k8s_skip_upgrade
   failed_when: false
   changed_when: false
@@ -80,7 +80,7 @@
     - not k8s_upgrade_skip_drain
     - k8s_actual_node_name | length > 0
   ignore_errors: true
-  delegate_to: "{{ groups['k8s_masters'][0] }}"
+  delegate_to: "{{ groups['control_plane'][0] }}"
 
 - name: "워커 노드 드레인 결과"
   debug:
@@ -164,7 +164,7 @@
     - not k8s_upgrade_skip_drain
     - k8s_actual_node_name | length > 0
   ignore_errors: true
-  delegate_to: "{{ groups['k8s_masters'][0] }}"
+  delegate_to: "{{ groups['control_plane'][0] }}"
 
 - name: "워커 노드 언코든 결과"
   debug:
@@ -184,7 +184,7 @@
   when: 
     - not k8s_skip_upgrade
     - k8s_actual_node_name | length > 0
-  delegate_to: "{{ groups['k8s_masters'][0] }}"
+  delegate_to: "{{ groups['control_plane'][0] }}"
 
 - name: "워커 노드에서 파드 실행 확인"
   shell: kubectl get pods --all-namespaces --field-selector spec.nodeName={{ k8s_actual_node_name }} | grep -v Terminating | wc -l
@@ -192,7 +192,7 @@
   when: 
     - not k8s_skip_upgrade
     - k8s_actual_node_name | length > 0
-  delegate_to: "{{ groups['k8s_masters'][0] }}"
+  delegate_to: "{{ groups['control_plane'][0] }}"
 
 - name: "업그레이드된 kubelet 버전 확인"
   command: kubelet --version

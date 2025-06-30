@@ -104,7 +104,7 @@
   set_fact:
     k8s_in_master_group: true
   when: 
-    - "'k8s_masters' in group_names or 'masters' in group_names or 'control_plane' in group_names"
+    - "'masters' in group_names or 'control_plane' in group_names"
 
 - name: "워커 그룹 멤버십 확인"
   set_fact:
@@ -143,7 +143,7 @@
     k8s_is_first_master: true
   when:
     - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default(groups['all'][0])
+    - inventory_hostname == groups['control_plane'][0] | default(groups['all'][0])
 
 - name: "첫 번째 마스터 노드 정보"
   debug:

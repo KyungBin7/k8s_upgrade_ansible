@@ -10,17 +10,17 @@
   shell: |
     kubelet --version | awk '{print $2}' | sed 's/v//'
   register: first_master_version
-  delegate_to: "{{ groups['k8s_masters'][0] | default(groups['all'][0]) }}"
+  delegate_to: "{{ groups['control_plane'][0] | default(groups['all'][0]) }}"
   until: first_master_version.stdout == k8s_target_version
   retries: "{{ (k8s_upgrade_timeout / 30) | int }}"
   delay: 30
-  when: groups['k8s_masters'] | length > 1
+  when: groups['control_plane'] | length > 1
 
 - name: "첫 번째 마스터 노드 업그레이드 완료 확인"
   debug:
     msg: "첫 번째 마스터 노드가 {{ first_master_version.stdout }} 버전으로 업그레이드 완료되었습니다"
   when: 
-    - groups['k8s_masters'] | length > 1
+    - groups['control_plane'] | length > 1
     - first_master_version is defined
 
 - name: "API 서버 연결 및 클러스터 상태 확인"
@@ -30,14 +30,14 @@
   until: api_check.rc == 0
   retries: 30
   delay: 10
-  delegate_to: "{{ groups['k8s_masters'][0] | default(groups['all'][0]) }}"
+  delegate_to: "{{ groups['control_plane'][0] | default(groups['all'][0]) }}"
 
 # 실제 Kubernetes 노드 이름 확인
 - name: "실제 Kubernetes 노드 이름 확인"
   shell: |
     kubectl get nodes -o jsonpath='{.items[*].metadata.name}' | tr ' ' '\n' | grep -E "({{ inventory_hostname }}|{{ ansible_hostname }}|{{ ansible_fqdn }})" | head -1
   register: k8s_node_name_result
-  delegate_to: "{{ groups['k8s_masters'][0] | default(groups['all'][0]) }}"
+  delegate_to: "{{ groups['control_plane'][0] | default(groups['all'][0]) }}"
   failed_when: false
   changed_when: false
 
@@ -57,7 +57,7 @@
       --delete-emptydir-data \
       --force \
       --timeout={{ k8s_upgrade_drain_timeout }}s
-  delegate_to: "{{ groups['k8s_masters'][0] | default(groups['all'][0]) }}"
+  delegate_to: "{{ groups['control_plane'][0] | default(groups['all'][0]) }}"
   when: 
     - not k8s_upgrade_skip_drain
     - k8s_actual_node_name | length > 0
@@ -95,7 +95,7 @@
 - name: "노드 언코든"
   shell: |
     kubectl uncordon {{ k8s_actual_node_name }}
-  delegate_to: "{{ groups['k8s_masters'][0] | default(groups['all'][0]) }}"
+  delegate_to: "{{ groups['control_plane'][0] | default(groups['all'][0]) }}"
   when: 
     - not k8s_upgrade_skip_cordon
     - k8s_actual_node_name | length > 0
@@ -108,7 +108,7 @@
   until: node_status.stdout == "True"
   retries: "{{ k8s_health_check_retries }}"
   delay: "{{ k8s_health_check_delay }}"
-  delegate_to: "{{ groups['k8s_masters'][0] | default(groups['all'][0]) }}"
+  delegate_to: "{{ groups['control_plane'][0] | default(groups['all'][0]) }}"
   when: k8s_actual_node_name | length > 0
 
 # 컨트롤 플레인 컴포넌트 상태 확인
@@ -122,7 +122,7 @@
   until: control_plane_pods.stdout | int == 0
   retries: "{{ k8s_health_check_retries }}"
   delay: "{{ k8s_health_check_delay }}"
-  delegate_to: "{{ groups['k8s_masters'][0] | default(groups['all'][0]) }}"
+  delegate_to: "{{ groups['control_plane'][0] | default(groups['all'][0]) }}"
   when: k8s_actual_node_name | length > 0
 
 # etcd 멤버 상태 확인
@@ -135,7 +135,7 @@
       --key=/etc/kubernetes/pki/etcd/server.key \
       member list
   register: etcd_status
-  delegate_to: "{{ groups['k8s_masters'][0] | default(groups['all'][0]) }}"
+  delegate_to: "{{ groups['control_plane'][0] | default(groups['all'][0]) }}"
   ignore_errors: true
   when: k8s_actual_node_name | length > 0
 

@@ -15,7 +15,7 @@
   command: kubectl version --short
   register: cluster_version_check
   when: not k8s_skip_upgrade
-  delegate_to: "{{ groups['k8s_masters'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
+  delegate_to: "{{ groups['control_plane'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
 
 - name: "클러스터 버전 표시"
   debug:
@@ -29,7 +29,7 @@
   command: kubectl get nodes
   register: all_nodes_status
   when: not k8s_skip_upgrade
-  delegate_to: "{{ groups['k8s_masters'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
+  delegate_to: "{{ groups['control_plane'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
 
 - name: "노드 상태 표시"
   debug:
@@ -43,7 +43,7 @@
   shell: kubectl get nodes --no-headers | grep -v Ready | wc -l
   register: not_ready_nodes
   when: not k8s_skip_upgrade
-  delegate_to: "{{ groups['k8s_masters'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
+  delegate_to: "{{ groups['control_plane'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
 
 - name: "모든 노드 Ready 상태 검증"
   fail:
@@ -57,7 +57,7 @@
   command: kubectl get pods -n kube-system
   register: system_pods_status
   when: not k8s_skip_upgrade
-  delegate_to: "{{ groups['k8s_masters'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
+  delegate_to: "{{ groups['control_plane'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
 
 - name: "시스템 파드 상태 표시"
   debug:
@@ -71,7 +71,7 @@
   shell: kubectl get pods -n kube-system --no-headers | grep -v Running | grep -v Completed | wc -l
   register: not_running_system_pods
   when: not k8s_skip_upgrade
-  delegate_to: "{{ groups['k8s_masters'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
+  delegate_to: "{{ groups['control_plane'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
 
 - name: "시스템 파드 Running 상태 검증"
   debug:
@@ -85,7 +85,7 @@
   shell: kubectl get pods -n kube-system -l k8s-app=kube-dns -o jsonpath='{.items[*].status.phase}'
   register: coredns_status
   when: not k8s_skip_upgrade
-  delegate_to: "{{ groups['k8s_masters'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
+  delegate_to: "{{ groups['control_plane'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
 
 - name: "CoreDNS 상태 검증"
   debug:

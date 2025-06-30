@@ -51,10 +51,10 @@
     label: "{{ item.item }}"
 
 # kubelet 설정 파일 복원
-- name: "kubelet 설정 파일 존재 확인"
+- name: "kubelet 설정 아카이브 존재 확인"
   stat:
-    path: "{{ k8s_backup_source_dir }}/kubelet"
-  register: kubelet_config_stat
+    path: "{{ k8s_backup_source_dir }}/kubelet.tar.gz"
+  register: kubelet_config_archive_stat
 
 - name: "kubelet 설정 디렉토리 복원"
   unarchive:
@@ -63,7 +63,7 @@
     remote_src: true
     owner: root
     group: root
-  when: kubelet_config_stat.stat.exists | default(false)
+  when: kubelet_config_archive_stat.stat.exists | default(false)
 
 # systemd 서비스 파일 복원
 - name: "systemd 서비스 파일 복원"

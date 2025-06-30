@@ -1,5 +1,6 @@
 ---
 # Kubernetes 클러스터 롤백 playbook
+# ansible-playbook -i inventory/hosts rollback-playbook.yml -e "k8s_backup_timestamp="
 
 - name: "Kubernetes 클러스터 롤백"
   hosts: all
