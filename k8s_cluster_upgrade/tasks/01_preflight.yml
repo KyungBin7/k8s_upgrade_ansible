@@ -143,6 +143,7 @@
       --key={{ k8s_config_dir }}/pki/etcd/server.key'
   register: etcd_member_list
   when: 
+    - k8s_detected_role is defined
     - k8s_detected_role == "master"
     - k8s_config_dir is defined
   failed_when: false
@@ -158,6 +159,7 @@
       --key={{ k8s_config_dir }}/pki/etcd/server.key'
   register: etcd_health_check
   when: 
+    - k8s_detected_role is defined
     - k8s_detected_role == "master"
     - k8s_config_dir is defined
   failed_when: false
@@ -174,6 +176,7 @@
       --write-out=table'
   register: etcd_status_check
   when: 
+    - k8s_detected_role is defined
     - k8s_detected_role == "master"
     - k8s_config_dir is defined
   failed_when: false
@@ -185,6 +188,7 @@
       - "=== etcd 클러스터 멤버 리스트 ==="
       - "{{ etcd_member_list.stdout_lines }}"
   when: 
+    - k8s_detected_role is defined
     - k8s_detected_role == "master"
     - etcd_member_list is defined
     - etcd_member_list.rc == 0
@@ -195,6 +199,7 @@
       - "=== etcd 클러스터 Health 상태 ==="
       - "{{ etcd_health_check.stdout_lines }}"
   when: 
+    - k8s_detected_role is defined
     - k8s_detected_role == "master"
     - etcd_health_check is defined
     - etcd_health_check.rc == 0
@@ -205,6 +210,7 @@
       - "=== etcd 클러스터 상태 정보 ==="
       - "{{ etcd_status_check.stdout_lines }}"
   when: 
+    - k8s_detected_role is defined
     - k8s_detected_role == "master"
     - etcd_status_check is defined
     - etcd_status_check.rc == 0
@@ -218,6 +224,7 @@
       - "업그레이드를 진행하기 전에 etcd 상태를 확인하세요."
       - "에러 메시지: {{ etcd_health_check.stderr_lines | default(['N/A']) }}"
   when: 
+    - k8s_detected_role is defined
     - k8s_detected_role == "master"
     - etcd_health_check is defined
     - etcd_health_check.rc != 0
@@ -230,6 +237,7 @@
       - "etcd 서비스가 실행 중인지 확인하세요."
       - "인증서 경로가 올바른지 확인하세요."
   when: 
+    - k8s_detected_role is defined
     - k8s_detected_role == "master"
     - etcd_member_list is defined
     - etcd_member_list.rc != 0
@@ -242,6 +250,7 @@
       - "업그레이드를 진행할 수 없습니다."
       - "etcd 문제를 해결한 후 다시 시도하세요."
   when: 
+    - k8s_detected_role is defined
     - k8s_detected_role == "master"
     - k8s_etcd_health_strict | default(false)
     - etcd_health_check is defined

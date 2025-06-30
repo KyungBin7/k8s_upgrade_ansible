@@ -5,32 +5,32 @@
   debug:
     msg: "Kubernetes 클러스터 업그레이드를 시작합니다"
 
-# 01. 사전 검사 및 환경 준비
-- name: "01. 사전 검사 수행"
+# 01. 노드 역할 감지 (가장 먼저 수행)
+- name: "01. 노드 역할 감지"
+  include_tasks: 04_detect_role.yml
+  tags:
+    - role
+    - always
+
+# 02. 사전 검사 및 환경 준비
+- name: "02. 사전 검사 수행"
   include_tasks: 01_preflight.yml
   tags:
     - preflight
     - always
 
-# 02. 현재 버전 감지
-- name: "02. 현재 Kubernetes 버전 감지"
+# 03. 현재 버전 감지
+- name: "03. 현재 Kubernetes 버전 감지"
   include_tasks: 02_detect_version.yml
   tags:
     - detect
     - always
 
-# 03. 목표 버전 결정
-- name: "03. 목표 버전 결정"
+# 04. 목표 버전 결정
+- name: "04. 목표 버전 결정"
   include_tasks: 03_determine_target.yml
   tags:
     - target
-    - always
-
-# 04. 노드 역할 감지
-- name: "04. 노드 역할 감지"
-  include_tasks: 04_detect_role.yml
-  tags:
-    - role
     - always
 
 # 05. 패키지 관리자 감지
