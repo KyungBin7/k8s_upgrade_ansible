@@ -1,6 +1,11 @@
 ---
 # 바이너리 설치
 
+# 기본 변수 설정 (include_tasks에서 전달되지 않은 경우)
+- name: "바이너리 설치 변수 초기화"
+  set_fact:
+    k8s_binaries_to_install: "{{ k8s_binaries_to_install | default(k8s_binary_files) }}"
+
 - name: "바이너리 설치 시작"
   debug:
     msg: "바이너리 설치를 시작합니다: {{ k8s_binaries_to_install | join(', ') }}"
