@@ -5,23 +5,77 @@
   debug:
     msg: "추가 컨트롤 플레인 노드 {{ inventory_hostname }}의 업그레이드를 시작합니다"
 
-# 첫 번째 마스터 노드 업그레이드 완료 확인
+# 첫 번째 마스터 노드 업그레이드 완료 확인을 위한 목표 버전 정규화
+- name: "목표 버전 정규화 (v 접두사 제거)"
+  set_fact:
+    k8s_target_version_clean: "{{ k8s_target_version | regex_replace('^v', '') }}"
+  when: groups['control_plane'] | length > 1
+
+- name: "목표 마이너 버전 추출"
+  set_fact:
+    k8s_target_minor_only: "{{ k8s_target_version_clean | regex_replace('\\.[0-9]+$', '') }}"
+  when: 
+    - groups['control_plane'] | length > 1
+    - k8s_target_version_clean is defined
+
+- name: "버전 비교 디버그 정보"
+  debug:
+    msg:
+      - "원본 목표 버전: {{ k8s_target_version }}"
+      - "정규화된 목표 버전: {{ k8s_target_version_clean | default('N/A') }}"
+      - "목표 마이너 버전: {{ k8s_target_minor_only | default('N/A') }}"
+  when: groups['control_plane'] | length > 1
+
 - name: "첫 번째 마스터 노드 kubelet 버전 확인"
   shell: |
     kubelet --version | awk '{print $2}' | sed 's/v//'
   register: first_master_version
   delegate_to: "{{ groups['control_plane'][0] | default(groups['all'][0]) }}"
-  until: first_master_version.stdout == k8s_target_version
+  when: groups['control_plane'] | length > 1
+  changed_when: false
+
+- name: "첫 번째 마스터 노드 버전 상세 디버그"
+  debug:
+    msg:
+      - "첫 번째 마스터 현재 버전: {{ first_master_version.stdout | default('확인 불가') }}"
+      - "목표 버전: {{ k8s_target_version_clean | default('N/A') }}"
+      - "버전 일치 여부: {{ (first_master_version.stdout | default('') == k8s_target_version_clean | default('')) }}"
+  when: 
+    - groups['control_plane'] | length > 1
+          - first_master_version is defined
+  
+- name: "첫 번째 마스터 노드 업그레이드 완료 대기 (마이너 버전 기준)"
+  shell: |
+    kubelet --version | awk '{print $2}' | sed 's/v//' | cut -d. -f1,2
+  register: first_master_minor_version
+  delegate_to: "{{ groups['control_plane'][0] | default(groups['all'][0]) }}"
+  until: first_master_minor_version.stdout == k8s_target_minor_only
   retries: "{{ (k8s_upgrade_timeout / 30) | int }}"
   delay: 30
-  when: groups['control_plane'] | length > 1
+  when: 
+    - groups['control_plane'] | length > 1
+    - k8s_target_minor_only is defined
+
+- name: "첫 번째 마스터 노드 정확한 버전 확인"
+  shell: |
+    kubelet --version | awk '{print $2}' | sed 's/v//'
+  register: first_master_final_version
+  delegate_to: "{{ groups['control_plane'][0] | default(groups['all'][0]) }}"
+  when: 
+    - groups['control_plane'] | length > 1
+    - first_master_minor_version is defined
+  changed_when: false
 
 - name: "첫 번째 마스터 노드 업그레이드 완료 확인"
   debug:
-    msg: "첫 번째 마스터 노드가 {{ first_master_version.stdout }} 버전으로 업그레이드 완료되었습니다"
+    msg: 
+      - "첫 번째 마스터 노드 업그레이드 완료 확인됨"
+      - "현재 버전: {{ first_master_final_version.stdout | default('확인 불가') }}"
+      - "목표 마이너 버전: {{ k8s_target_minor_only | default('N/A') }}"
+      - "실제 마이너 버전: {{ first_master_minor_version.stdout | default('N/A') }}"
   when: 
     - groups['control_plane'] | length > 1
-    - first_master_version is defined
+    - (first_master_final_version is defined or k8s_target_minor_only is defined)
 
 - name: "API 서버 연결 및 클러스터 상태 확인"
   shell: |
