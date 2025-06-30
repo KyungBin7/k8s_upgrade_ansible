@@ -25,6 +25,7 @@
   set_fact:
     crio_target_version: "{{ k8s_version_matrix[k8s_target_minor_version].crio_version }}"
     crio_minor_version: "{{ k8s_version_matrix[k8s_target_minor_version].crio_minor_version }}"
+    crio_opensuse_available: "{{ k8s_version_matrix[k8s_target_minor_version].opensuse_available | default(false) }}"
   when: 
     - k8s_version_matrix[k8s_target_minor_version].crio_version is defined
     - k8s_version_matrix[k8s_target_minor_version].crio_minor_version is defined
@@ -33,15 +34,6 @@
   debug:
     msg: "CRI-O 목표 버전: {{ crio_target_version | default('N/A') }}"
 
-# 버전 비교 및 업그레이드 필요 여부 확인
-- name: "CRI-O 업그레이드 필요 여부 확인"
-  set_fact:
-    crio_needs_upgrade: "{{ crio_current_version.stdout != crio_target_version and crio_target_version is defined and crio_target_version != 'N/A' }}"
-
-- name: "CRI-O 업그레이드 스킵"
-  debug:
-    msg: "CRI-O 업그레이드가 필요하지 않습니다 (현재: {{ crio_current_version.stdout }}, 목표: {{ crio_target_version | default('N/A') }})"
-  when: not crio_needs_upgrade
 
 # CRI-O 저장소 확인 변수 초기화
 - name: "CRI-O 저장소 확인 변수 초기화"
@@ -94,9 +86,11 @@
       - "현재 CRI-O 버전: {{ crio_current_version.stdout | default('unknown') }}"
       - "목표 CRI-O 버전: {{ crio_target_version | default('N/A') }}"
       - "CRI-O 마이너 버전: {{ crio_minor_version | default('N/A') }}"
+      - "OpenSUSE 저장소 지원: {{ crio_opensuse_available | default(false) }}"
       - "패키지 관리자: {{ k8s_detected_package_manager | default('unknown') }}"
       - "공식 저장소 사용 가능: {{ crio_available_in_repo | default(false) }}"
       - "OpenSUSE URL: {{ k8s_opensuse_crio_base_url }}:/{{ crio_minor_version | default('N/A') }}:/{{ crio_target_version | default('N/A') }}/{{ k8s_opensuse_os_version }}/"
+      - "Fallback 패키지: {{ crio_fallback_package | default('N/A') }}"
   when: crio_needs_upgrade
 
 # CRI-O 서비스 중지
@@ -128,6 +122,13 @@
     - crio_available_in_repo | default(false)
 
 # 방법 2: 바이너리 방식으로 CRI-O 설치 (공식 저장소에 없는 경우)
+- name: "OpenSUSE 저장소 사용 가능성 확인"
+  debug:
+    msg: "OpenSUSE 저장소에서 CRI-O {{ crio_target_version }} 사용 가능: {{ crio_opensuse_available | default(false) }}"
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+
 - name: "OpenSUSE 저장소에서 CRI-O 바이너리 다운로드 URL 확인"
   uri:
     url: "{{ k8s_opensuse_crio_base_url }}:/{{ crio_minor_version }}:/{{ crio_target_version }}/{{ k8s_opensuse_os_version }}/"
@@ -137,17 +138,19 @@
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
+    - crio_opensuse_available | default(false)
     - crio_minor_version is defined
     - crio_target_version is defined
   ignore_errors: true
 
-- name: "OpenSUSE 저장소 사용 가능성 확인"
+- name: "OpenSUSE 저장소 응답 확인"
   set_fact:
     opensuse_crio_available: "{{ opensuse_repo_check.status == 200 }}"
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
     - opensuse_repo_check is defined
+    - opensuse_repo_check.status is defined
 
 - name: "CRI-O 바이너리 다운로드 디렉토리 생성"
   file:
@@ -159,16 +162,25 @@
     - not (crio_available_in_repo | default(false))
     - opensuse_crio_available | default(false)
 
-- name: "일반적인 CRI-O RPM 패키지 다운로드 시도 (패키지 목록에서 찾지 못한 경우)"
+- name: "표준 CRI-O RPM 패키지명 생성"
+  set_fact:
+    crio_fallback_package: "cri-o-{{ crio_target_version }}-150300.1.1.el8.x86_64.rpm"
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+    - opensuse_crio_available | default(false)
+
+- name: "표준 CRI-O RPM 패키지 다운로드 시도"
   get_url:
-    url: "{{ k8s_opensuse_crio_base_url }}:/{{ crio_minor_version }}:/{{ crio_target_version }}/{{ k8s_opensuse_os_version }}/x86_64/cri-o-{{ crio_target_version }}-1.el8.x86_64.rpm"
-    dest: "/tmp/crio-upgrade/cri-o-{{ crio_target_version }}-1.el8.x86_64.rpm"
+    url: "{{ k8s_opensuse_crio_base_url }}:/{{ crio_minor_version }}:/{{ crio_target_version }}/{{ k8s_opensuse_os_version }}/x86_64/{{ crio_fallback_package }}"
+    dest: "/tmp/crio-upgrade/{{ crio_fallback_package }}"
     mode: '0644'
   register: crio_fallback_download
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
     - opensuse_crio_available | default(false)
+    - crio_fallback_package is defined
   ignore_errors: true
 
 - name: "OpenSUSE 저장소에서 사용 가능한 CRI-O 패키지 목록 확인"
@@ -183,12 +195,13 @@
 
 - name: "사용 가능한 CRI-O 패키지 파일명 추출"
   set_fact:
-    crio_package_name: "{{ opensuse_package_list.content | regex_search('cri-o-' + crio_target_version + '[^\"]*\\.rpm') }}"
+    crio_package_name: "{{ opensuse_package_list.content | default('') | regex_search('cri-o-' + crio_target_version + '[^\"]*\\.rpm') }}"
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
     - opensuse_crio_available | default(false)
     - opensuse_package_list is defined
+    - opensuse_package_list.content is defined
 
 - name: "CRI-O 패키지 파일명 확인"
   debug:
@@ -224,7 +237,7 @@
 
 - name: "CRI-O RPM 패키지 설치 (fallback 패키지)"
   yum:
-    name: "/tmp/crio-upgrade/cri-o-{{ crio_target_version }}-1.el8.x86_64.rpm"
+    name: "/tmp/crio-upgrade/{{ crio_fallback_package }}"
     state: present
     disable_gpg_check: yes
   when: 
@@ -234,6 +247,7 @@
     - (crio_package_name is not defined or crio_package_name == "")
     - crio_fallback_download is defined
     - not crio_fallback_download.failed
+    - crio_fallback_package is defined
 
 # CRI-O 설정 업데이트
 - name: "CRI-O 설정 백업"

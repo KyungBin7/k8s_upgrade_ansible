@@ -63,40 +63,48 @@ k8s_skip_certificate_verification: false
 k8s_etcd_health_strict: false  # true로 설정하면 etcd health 실패 시 업그레이드 중단
 k8s_etcd_health_timeout: 30    # etcd health 체크 타임아웃 (초)
 
-# Kubernetes와 CRI-O 버전 호환성 매트릭스
+# Kubernetes와 CRI-O 버전 호환성 매트릭스 (OpenSUSE 저장소에서 실제 사용 가능한 버전)
 k8s_version_matrix:
   "1.23":
-    crio_version: "1.23.5"
+    crio_version: "1.23.2"
     crio_minor_version: "1.23"
-    supported_crio_versions: ["1.23.0", "1.23.1", "1.23.2", "1.23.3", "1.23.4", "1.23.5"]
+    supported_crio_versions: ["1.23.2", "1.23.3", "1.23.4", "1.23.5"]
+    opensuse_available: true
   "1.24":
-    crio_version: "1.24.6"
+    crio_version: "1.24.3"
     crio_minor_version: "1.24"
-    supported_crio_versions: ["1.24.0", "1.24.1", "1.24.2", "1.24.3", "1.24.4", "1.24.6"]
+    supported_crio_versions: ["1.24.1", "1.24.2", "1.24.3", "1.24.4"]
+    opensuse_available: true
   "1.25":
-    crio_version: "1.25.5"
+    crio_version: "1.25.3"
     crio_minor_version: "1.25"
-    supported_crio_versions: ["1.25.0", "1.25.1", "1.25.2", "1.25.3", "1.25.4", "1.25.5"]
+    supported_crio_versions: ["1.25.1", "1.25.2", "1.25.3", "1.25.4"]
+    opensuse_available: true
   "1.26":
-    crio_version: "1.26.5"
+    crio_version: "1.26.4"
     crio_minor_version: "1.26"
-    supported_crio_versions: ["1.26.0", "1.26.1", "1.26.2", "1.26.3", "1.26.4", "1.26.5"]
+    supported_crio_versions: ["1.26.1", "1.26.2", "1.26.3", "1.26.4"]
+    opensuse_available: true
   "1.27":
-    crio_version: "1.27.6"
+    crio_version: "1.27.3"
     crio_minor_version: "1.27"
-    supported_crio_versions: ["1.27.0", "1.27.1", "1.27.2", "1.27.3", "1.27.4", "1.27.6"]
+    supported_crio_versions: ["1.27.1", "1.27.2", "1.27.3", "1.27.4"]
+    opensuse_available: true
   "1.28":
-    crio_version: "1.28.5"
+    crio_version: "1.28.4"
     crio_minor_version: "1.28"
-    supported_crio_versions: ["1.28.0", "1.28.1", "1.28.2", "1.28.3", "1.28.4", "1.28.5"]
+    supported_crio_versions: ["1.28.1", "1.28.2", "1.28.3", "1.28.4"]
+    opensuse_available: true
   "1.29":
-    crio_version: "1.29.5"
+    crio_version: "1.29.3"
     crio_minor_version: "1.29"
-    supported_crio_versions: ["1.29.0", "1.29.1", "1.29.2", "1.29.3", "1.29.4", "1.29.5"]
+    supported_crio_versions: ["1.29.1", "1.29.2", "1.29.3", "1.29.4"]
+    opensuse_available: true
   "1.30":
-    crio_version: "1.30.4"
+    crio_version: "1.30.2"
     crio_minor_version: "1.30"
-    supported_crio_versions: ["1.30.0", "1.30.1", "1.30.2", "1.30.3", "1.30.4"]
+    supported_crio_versions: ["1.30.1", "1.30.2", "1.30.3"]
+    opensuse_available: true
 
 # CRI-O 업그레이드 설정
 k8s_crio_upgrade_enabled: true  # CRI-O 업그레이드 활성화
