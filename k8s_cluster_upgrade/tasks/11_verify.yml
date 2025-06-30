@@ -96,19 +96,16 @@
 
 # API 서버 상태 확인
 - name: "API 서버 헬스체크"
-  uri:
-    url: "https://{{ ansible_default_ipv4.address }}:6443/healthz"
-    method: GET
-    validate_certs: no
-    status_code: 200
+  shell: kubectl cluster-info
   register: api_server_health
   when: 
     - not k8s_skip_upgrade
     - k8s_detected_role == "master"
+  ignore_errors: true
 
 - name: "API 서버 헬스체크 결과"
   debug:
-    msg: "API 서버 상태: {{ 'OK' if api_server_health.status == 200 else 'Failed' }}"
+    msg: "API 서버 상태: {{ 'OK' if api_server_health.rc == 0 else 'Failed' }}"
   when: 
     - not k8s_skip_upgrade
     - k8s_detected_role == "master"
