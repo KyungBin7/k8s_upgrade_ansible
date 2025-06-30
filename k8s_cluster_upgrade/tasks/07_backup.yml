@@ -67,7 +67,6 @@
     src: "{{ item.item }}"
     dest: "{{ k8s_current_backup_dir }}/{{ item.item | basename }}"
     remote_src: true
-    mode: preserve
   loop: "{{ backup_files_stat.results }}"
   when: 
     - item.stat is defined

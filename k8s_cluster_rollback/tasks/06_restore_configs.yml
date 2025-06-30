@@ -33,7 +33,6 @@
     remote_src: true
     owner: root
     group: root
-    mode: preserve
   when: k8s_config_archive.stat.exists | default(false)
 
 # 개별 설정 파일 복원
@@ -42,7 +41,6 @@
     src: "{{ k8s_backup_source_dir }}/{{ item.item | basename }}"
     dest: "{{ item.item }}"
     remote_src: true
-    mode: preserve
     backup: true
   loop: "{{ config_files_stat.results }}"
   when: 
@@ -65,7 +63,6 @@
     remote_src: true
     owner: root
     group: root
-    mode: preserve
   when: kubelet_config_stat.stat.exists | default(false)
 
 # systemd 서비스 파일 복원
@@ -74,7 +71,6 @@
     src: "{{ k8s_backup_source_dir }}/systemd/"
     dest: "/etc/systemd/system/"
     remote_src: true
-    mode: preserve
   ignore_errors: true
 
 # 설정 파일 권한 수정
@@ -88,13 +84,21 @@
   when: k8s_config_archive.stat.exists | default(false)
 
 # PKI 인증서 권한 특별 처리
-- name: "PKI 인증서 권한 설정"
+- name: "PKI 인증서 디렉토리 권한 설정"
   file:
     path: "{{ k8s_config_dir }}/pki"
     owner: root
     group: root
-    mode: '0600'
-    recurse: true
+    mode: '0755'
+    state: directory
+  when: k8s_config_archive.stat.exists | default(false)
+  ignore_errors: true
+
+- name: "PKI 인증서 파일 권한 설정"
+  shell: |
+    find {{ k8s_config_dir }}/pki -name "*.crt" -exec chmod 644 {} \;
+    find {{ k8s_config_dir }}/pki -name "*.key" -exec chmod 600 {} \;
+    find {{ k8s_config_dir }}/pki -name "*.conf" -exec chmod 644 {} \;
   when: k8s_config_archive.stat.exists | default(false)
   ignore_errors: true
 

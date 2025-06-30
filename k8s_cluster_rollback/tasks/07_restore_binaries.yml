@@ -29,7 +29,7 @@
     src: "{{ k8s_bin_dir }}/{{ item }}"
     dest: "{{ k8s_temp_dirs.backup_current }}/{{ item }}-current"
     remote_src: yes
-    mode: preserve
+    mode: '0755'
   loop: "{{ k8s_backup_binaries }}"
   when: 
     - not k8s_dry_run | default(false)

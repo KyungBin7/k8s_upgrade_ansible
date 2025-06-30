@@ -56,7 +56,6 @@
     src: "{{ item }}"
     dest: "{{ k8s_current_state_backup_dir }}/"
     remote_src: true
-    mode: preserve
   loop: "{{ k8s_restore_files }}"
   ignore_errors: true
 
