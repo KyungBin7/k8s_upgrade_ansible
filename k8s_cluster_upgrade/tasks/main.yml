@@ -54,6 +54,16 @@
   tags:
     - backup
 
+# 07.5. CRI-O 컨테이너 런타임 업그레이드
+- name: "07.5. CRI-O 컨테이너 런타임 업그레이드"
+  include_tasks: 13_upgrade_crio.yml
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_container_runtime == 'crio'
+  tags:
+    - crio
+    - runtime
+
 # 08. 마스터 노드 업그레이드 (control_plane 단계에서만)
 - name: "08. 첫 번째 컨트롤 플레인 업그레이드"
   include_tasks: 08_upgrade_control_plane.yml

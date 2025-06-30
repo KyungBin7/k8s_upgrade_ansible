@@ -1,0 +1,24 @@
+---
+# Kubernetes 클러스터 업그레이드 핸들러
+
+- name: restart crio
+  systemd:
+    name: crio
+    state: restarted
+    daemon_reload: yes
+  listen: "restart crio"
+
+- name: restart kubelet
+  systemd:
+    name: kubelet
+    state: restarted
+    daemon_reload: yes
+  listen: "restart kubelet"
+
+- name: restart containerd
+  systemd:
+    name: containerd
+    state: restarted
+    daemon_reload: yes
+  listen: "restart containerd"
+  when: k8s_container_runtime == 'containerd' 

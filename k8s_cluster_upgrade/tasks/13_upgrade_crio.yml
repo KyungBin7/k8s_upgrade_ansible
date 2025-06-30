@@ -1,0 +1,279 @@
+---
+# CRI-O 컨테이너 런타임 업그레이드
+
+- name: "CRI-O 업그레이드 시작"
+  debug:
+    msg: "CRI-O 컨테이너 런타임 업그레이드를 시작합니다"
+
+# 현재 CRI-O 버전 확인
+- name: "현재 CRI-O 버전 확인"
+  shell: |
+    if command -v crio >/dev/null 2>&1; then
+      crio version | grep -E "crio version|RuntimeVersion" | head -1 | awk '{print $NF}' | sed 's/^v//'
+    else
+      echo "not_installed"
+    fi
+  register: crio_current_version
+  changed_when: false
+
+- name: "현재 CRI-O 버전 표시"
+  debug:
+    msg: "현재 CRI-O 버전: {{ crio_current_version.stdout }}"
+
+# Kubernetes와 CRI-O 버전 호환성 매트릭스
+- name: "CRI-O 목표 버전 결정"
+  set_fact:
+    crio_target_version: "{{ k8s_version_matrix[k8s_target_minor_version].crio_version }}"
+  when: k8s_version_matrix[k8s_target_minor_version].crio_version is defined
+
+- name: "CRI-O 목표 버전 표시"
+  debug:
+    msg: "CRI-O 목표 버전: {{ crio_target_version | default('N/A') }}"
+
+# 버전 비교 및 업그레이드 필요 여부 확인
+- name: "CRI-O 업그레이드 필요 여부 확인"
+  set_fact:
+    crio_needs_upgrade: "{{ crio_current_version.stdout != crio_target_version and crio_target_version is defined and crio_target_version != 'N/A' }}"
+
+- name: "CRI-O 업그레이드 스킵"
+  debug:
+    msg: "CRI-O 업그레이드가 필요하지 않습니다 (현재: {{ crio_current_version.stdout }}, 목표: {{ crio_target_version | default('N/A') }})"
+  when: not crio_needs_upgrade
+
+# 공식 저장소에서 CRI-O 버전 확인
+- name: "공식 저장소에서 CRI-O 버전 확인 (Rocky/RHEL)"
+  shell: |
+    if command -v yum >/dev/null 2>&1; then
+      yum list available cri-o --showduplicates 2>/dev/null | grep "{{ crio_target_version }}" || echo "not_available"
+    else
+      echo "not_yum"
+    fi
+  register: crio_repo_check
+  when: 
+    - crio_needs_upgrade
+    - k8s_detected_package_manager == 'yum'
+  changed_when: false
+
+- name: "공식 저장소에서 CRI-O 버전 확인 (Ubuntu/Debian)"
+  shell: |
+    if command -v apt >/dev/null 2>&1; then
+      apt-cache madison cri-o 2>/dev/null | grep "{{ crio_target_version }}" || echo "not_available"
+    else
+      echo "not_apt"
+    fi
+  register: crio_repo_check
+  when: 
+    - crio_needs_upgrade
+    - k8s_detected_package_manager == 'apt'
+  changed_when: false
+
+# 공식 저장소 사용 가능 여부 확인
+- name: "공식 저장소 CRI-O 버전 사용 가능성 확인"
+  set_fact:
+    crio_available_in_repo: "{{ crio_repo_check.stdout != 'not_available' and 'not_available' not in crio_repo_check.stdout }}"
+  when: 
+    - crio_needs_upgrade
+    - crio_repo_check is defined
+
+# CRI-O 서비스 중지
+- name: "CRI-O 서비스 중지"
+  systemd:
+    name: crio
+    state: stopped
+  when: crio_needs_upgrade
+
+# 방법 1: 공식 저장소에서 CRI-O 업그레이드
+- name: "공식 저장소에서 CRI-O 업그레이드 (Rocky/RHEL)"
+  yum:
+    name: "cri-o-{{ crio_target_version }}*"
+    state: present
+    update_cache: yes
+  when: 
+    - crio_needs_upgrade
+    - k8s_detected_package_manager == 'yum'
+    - crio_available_in_repo | default(false)
+
+- name: "공식 저장소에서 CRI-O 업그레이드 (Ubuntu/Debian)"
+  apt:
+    name: "cri-o={{ crio_target_version }}*"
+    state: present
+    update_cache: yes
+  when: 
+    - crio_needs_upgrade
+    - k8s_detected_package_manager == 'apt'
+    - crio_available_in_repo | default(false)
+
+# 방법 2: 바이너리 방식으로 CRI-O 설치 (공식 저장소에 없는 경우)
+- name: "OpenSUSE 저장소에서 CRI-O 바이너리 다운로드 URL 확인"
+  uri:
+    url: "{{ k8s_opensuse_crio_base_url }}:/{{ crio_target_version }}/{{ k8s_opensuse_os_version }}/"
+    method: GET
+    status_code: [200, 404]
+  register: opensuse_repo_check
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+  ignore_errors: true
+
+- name: "OpenSUSE 저장소 사용 가능성 확인"
+  set_fact:
+    opensuse_crio_available: "{{ opensuse_repo_check.status == 200 }}"
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+    - opensuse_repo_check is defined
+
+- name: "CRI-O 바이너리 다운로드 디렉토리 생성"
+  file:
+    path: /tmp/crio-upgrade
+    state: directory
+    mode: '0755'
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+    - opensuse_crio_available | default(false)
+
+- name: "CRI-O RPM 패키지 다운로드"
+  get_url:
+    url: "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/{{ crio_target_version }}/CentOS_8_Stream/x86_64/cri-o-{{ crio_target_version }}.{{ ansible_date_time.epoch }}.el8.x86_64.rpm"
+    dest: "/tmp/crio-upgrade/cri-o-{{ crio_target_version }}.rpm"
+    mode: '0644'
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+    - opensuse_crio_available | default(false)
+  ignore_errors: true
+
+- name: "OpenSUSE 저장소에서 사용 가능한 CRI-O 패키지 목록 확인"
+  uri:
+    url: "{{ k8s_opensuse_crio_base_url }}:/{{ crio_target_version }}/{{ k8s_opensuse_os_version }}/x86_64/"
+    method: GET
+  register: opensuse_package_list
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+    - opensuse_crio_available | default(false)
+
+- name: "사용 가능한 CRI-O 패키지 파일명 추출"
+  set_fact:
+    crio_package_name: "{{ opensuse_package_list.content | regex_search('cri-o-' + crio_target_version + '[^\"]*\\.rpm') }}"
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+    - opensuse_crio_available | default(false)
+    - opensuse_package_list is defined
+
+- name: "CRI-O 패키지 파일명 확인"
+  debug:
+    msg: "찾은 CRI-O 패키지: {{ crio_package_name | default('없음') }}"
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+    - opensuse_crio_available | default(false)
+
+- name: "실제 CRI-O RPM 패키지 다운로드"
+  get_url:
+    url: "{{ k8s_opensuse_crio_base_url }}:/{{ crio_target_version }}/{{ k8s_opensuse_os_version }}/x86_64/{{ crio_package_name }}"
+    dest: "/tmp/crio-upgrade/{{ crio_package_name }}"
+    mode: '0644'
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+    - opensuse_crio_available | default(false)
+    - crio_package_name is defined
+    - crio_package_name != ""
+
+- name: "CRI-O RPM 패키지 설치"
+  yum:
+    name: "/tmp/crio-upgrade/{{ crio_package_name }}"
+    state: present
+    disable_gpg_check: yes
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+    - opensuse_crio_available | default(false)
+    - crio_package_name is defined
+    - crio_package_name != ""
+
+# CRI-O 설정 업데이트
+- name: "CRI-O 설정 백업"
+  copy:
+    src: /etc/crio/crio.conf
+    dest: "/etc/crio/crio.conf.backup.{{ ansible_date_time.epoch }}"
+    remote_src: yes
+  when: crio_needs_upgrade
+  ignore_errors: true
+
+- name: "CRI-O 구성 파일 업데이트"
+  template:
+    src: crio.conf.j2
+    dest: /etc/crio/crio.conf
+    backup: yes
+    mode: '0644'
+  when: crio_needs_upgrade
+  notify:
+    - restart crio
+
+# CRI-O 서비스 시작 및 활성화
+- name: "systemd 데몬 리로드"
+  systemd:
+    daemon_reload: yes
+  when: crio_needs_upgrade
+
+- name: "CRI-O 서비스 시작 및 활성화"
+  systemd:
+    name: crio
+    state: started
+    enabled: yes
+  when: crio_needs_upgrade
+
+# 업그레이드 후 검증
+- name: "업그레이드된 CRI-O 버전 확인"
+  shell: |
+    crio version | grep -E "crio version|RuntimeVersion" | head -1 | awk '{print $NF}' | sed 's/^v//'
+  register: crio_upgraded_version
+  when: crio_needs_upgrade
+  changed_when: false
+
+- name: "CRI-O 서비스 상태 확인"
+  systemd:
+    name: crio
+  register: crio_service_status
+  when: crio_needs_upgrade
+
+- name: "CRI-O 소켓 상태 확인"
+  stat:
+    path: /var/run/crio/crio.sock
+  register: crio_socket_status
+  when: crio_needs_upgrade
+
+# kubelet과 CRI-O 연결 테스트
+- name: "kubelet 서비스 재시작 (CRI-O 연결 갱신)"
+  systemd:
+    name: kubelet
+    state: restarted
+  when: crio_needs_upgrade
+
+- name: "CRI-O 업그레이드 결과 표시"
+  debug:
+    msg:
+      - "=== CRI-O 업그레이드 완료 ==="
+      - "이전 버전: {{ crio_current_version.stdout }}"
+      - "업그레이드된 버전: {{ crio_upgraded_version.stdout | default('확인 불가') }}"
+      - "서비스 상태: {{ crio_service_status.status.ActiveState | default('확인 불가') }}"
+      - "소켓 파일 존재: {{ crio_socket_status.stat.exists | default(false) }}"
+  when: crio_needs_upgrade
+
+# 임시 파일 정리
+- name: "임시 다운로드 파일 정리"
+  file:
+    path: /tmp/crio-upgrade
+    state: absent
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+
+- name: "CRI-O 업그레이드 완료"
+  debug:
+    msg: "CRI-O 컨테이너 런타임 업그레이드가 완료되었습니다."
+  when: crio_needs_upgrade 

@@ -10,13 +10,13 @@ ansible_become=true
 ansible_become_method=sudo
 
 [control_plane]
-master1 ansible_host=10.40.151.121
-master2 ansible_host=10.40.151.122
-master3 ansible_host=10.40.151.123
+master01.mtp.local ansible_host=10.40.151.121
+master02.mtp.local ansible_host=10.40.151.122
+master03.mtp.local ansible_host=10.40.151.123
 
 [workers] 
-worker1 ansible_host=10.40.151.131
-worker2 ansible_host=10.40.151.132
+worker01.mtp.local ansible_host=10.40.151.131
+worker02.mtp.local ansible_host=10.40.151.132
 
 # 별칭 그룹 정의
 [masters:children]
