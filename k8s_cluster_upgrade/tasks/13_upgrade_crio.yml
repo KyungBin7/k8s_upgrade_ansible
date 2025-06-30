@@ -151,11 +151,12 @@
     - not (crio_available_in_repo | default(false))
     - opensuse_crio_available | default(false)
 
-- name: "CRI-O RPM 패키지 다운로드"
+- name: "일반적인 CRI-O RPM 패키지 다운로드 시도 (패키지 목록에서 찾지 못한 경우)"
   get_url:
-    url: "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o:/{{ crio_target_version }}/CentOS_8_Stream/x86_64/cri-o-{{ crio_target_version }}.{{ ansible_date_time.epoch }}.el8.x86_64.rpm"
-    dest: "/tmp/crio-upgrade/cri-o-{{ crio_target_version }}.rpm"
+    url: "{{ k8s_opensuse_crio_base_url }}:/{{ crio_target_version }}/{{ k8s_opensuse_os_version }}/x86_64/cri-o-{{ crio_target_version }}.0-1.el8.x86_64.rpm"
+    dest: "/tmp/crio-upgrade/cri-o-{{ crio_target_version }}.0-1.el8.x86_64.rpm"
     mode: '0644'
+  register: crio_fallback_download
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
@@ -201,7 +202,7 @@
     - crio_package_name is defined
     - crio_package_name != ""
 
-- name: "CRI-O RPM 패키지 설치"
+- name: "CRI-O RPM 패키지 설치 (패키지 목록에서 찾은 패키지)"
   yum:
     name: "/tmp/crio-upgrade/{{ crio_package_name }}"
     state: present
@@ -212,6 +213,19 @@
     - opensuse_crio_available | default(false)
     - crio_package_name is defined
     - crio_package_name != ""
+
+- name: "CRI-O RPM 패키지 설치 (fallback 패키지)"
+  yum:
+    name: "/tmp/crio-upgrade/cri-o-{{ crio_target_version }}.0-1.el8.x86_64.rpm"
+    state: present
+    disable_gpg_check: yes
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+    - opensuse_crio_available | default(false)
+    - (crio_package_name is not defined or crio_package_name == "")
+    - crio_fallback_download is defined
+    - not crio_fallback_download.failed
 
 # CRI-O 설정 업데이트
 - name: "CRI-O 설정 백업"
