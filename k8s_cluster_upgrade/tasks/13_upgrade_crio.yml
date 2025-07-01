@@ -266,29 +266,6 @@
     - opensuse_crio_repo_url is defined
     - opensuse_crio_repo_url != ""
 
-- name: "표준 CRI-O RPM 패키지명 생성"
-  set_fact:
-    crio_fallback_package: "cri-o-{{ crio_target_version }}-150300.1.1.el8.x86_64.rpm"
-  when: 
-    - crio_needs_upgrade
-    - not (crio_available_in_repo | default(false))
-    - opensuse_crio_repo_url is defined
-    - opensuse_crio_repo_url != ""
-
-- name: "표준 CRI-O RPM 패키지 다운로드 시도"
-  get_url:
-    url: "{{ opensuse_crio_repo_url }}{{ crio_fallback_package }}"
-    dest: "/tmp/crio-upgrade/{{ crio_fallback_package }}"
-    mode: '0644'
-  register: crio_fallback_download
-  when: 
-    - crio_needs_upgrade
-    - not (crio_available_in_repo | default(false))
-    - opensuse_crio_repo_url is defined
-    - opensuse_crio_repo_url != ""
-    - crio_fallback_package is defined
-  ignore_errors: true
-
 - name: "OpenSUSE 저장소에서 사용 가능한 CRI-O 패키지 목록 확인"
   uri:
     url: "{{ opensuse_crio_repo_url }}"
@@ -300,9 +277,9 @@
     - opensuse_crio_repo_url is defined
     - opensuse_crio_repo_url != ""
 
-- name: "사용 가능한 CRI-O 패키지 파일명 추출"
+- name: "사용 가능한 CRI-O 패키지 파일명 추출 (정확한 패턴 매칭)"
   set_fact:
-    crio_package_name: "{{ opensuse_package_list.content | default('') | regex_search('cri-o-' + crio_target_version + '[^\"]*\\.rpm') }}"
+    crio_package_name: "{{ opensuse_package_list.content | default('') | regex_search('cri-o-' + crio_target_version + '-[0-9]+\\.[0-9]+\\.el8\\.x86_64\\.rpm') }}"
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
@@ -310,6 +287,18 @@
     - opensuse_crio_repo_url != ""
     - opensuse_package_list is defined
     - opensuse_package_list.content is defined
+
+- name: "대체 패턴으로 CRI-O 패키지 파일명 추출 (첫 번째 패턴 실패 시)"
+  set_fact:
+    crio_package_name: "{{ opensuse_package_list.content | default('') | regex_search('cri-o-' + crio_target_version + '[^\"\\s]*\\.rpm') }}"
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+    - opensuse_crio_repo_url is defined
+    - opensuse_crio_repo_url != ""
+    - opensuse_package_list is defined
+    - opensuse_package_list.content is defined
+    - (crio_package_name is not defined or crio_package_name == "")
 
 - name: "CRI-O 패키지 파일명 확인"
   debug:
@@ -320,11 +309,22 @@
     - opensuse_crio_repo_url is defined
     - opensuse_crio_repo_url != ""
 
+- name: "CRI-O 패키지명 존재 확인"
+  fail:
+    msg: "저장소에서 CRI-O {{ crio_target_version }} 패키지를 찾을 수 없습니다. 저장소 URL: {{ opensuse_crio_repo_url }}"
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+    - opensuse_crio_repo_url is defined
+    - opensuse_crio_repo_url != ""
+    - (crio_package_name is not defined or crio_package_name == "")
+
 - name: "실제 CRI-O RPM 패키지 다운로드"
   get_url:
     url: "{{ opensuse_crio_repo_url }}{{ crio_package_name }}"
     dest: "/tmp/crio-upgrade/{{ crio_package_name }}"
     mode: '0644'
+  register: crio_download_result
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
@@ -333,7 +333,14 @@
     - crio_package_name is defined
     - crio_package_name != ""
 
-- name: "CRI-O RPM 패키지 설치 (패키지 목록에서 찾은 패키지)"
+- name: "CRI-O 패키지 다운로드 결과 확인"
+  debug:
+    msg: "CRI-O 패키지 다운로드 {{ '성공' if not crio_download_result.failed else '실패' }}: {{ crio_package_name }}"
+  when: 
+    - crio_needs_upgrade
+    - crio_download_result is defined
+
+- name: "CRI-O RPM 패키지 설치"
   yum:
     name: "/tmp/crio-upgrade/{{ crio_package_name }}"
     state: present
@@ -346,40 +353,26 @@
     - opensuse_crio_repo_url != ""
     - crio_package_name is defined
     - crio_package_name != ""
-
-- name: "CRI-O RPM 패키지 설치 (fallback 패키지)"
-  yum:
-    name: "/tmp/crio-upgrade/{{ crio_fallback_package }}"
-    state: present
-    disable_gpg_check: yes
-  register: crio_fallback_install_result
-  when: 
-    - crio_needs_upgrade
-    - not (crio_available_in_repo | default(false))
-    - opensuse_crio_repo_url is defined
-    - opensuse_crio_repo_url != ""
-    - (crio_package_name is not defined or crio_package_name == "")
-    - crio_fallback_download is defined
-    - not crio_fallback_download.failed
-    - crio_fallback_package is defined
+    - crio_download_result is defined
+    - not crio_download_result.failed
 
 - name: "CRI-O 패키지 설치 결과 확인"
   debug:
-    msg: 
-      - "주 패키지 설치: {{ 'N/A' if crio_install_result is not defined else ('성공' if crio_install_result.rc == 0 else '실패') }}"
-      - "Fallback 패키지 설치: {{ 'N/A' if crio_fallback_install_result is not defined else ('성공' if crio_fallback_install_result.rc == 0 else '실패') }}"
-  when: crio_needs_upgrade
+    msg: "CRI-O 패키지 설치 {{ '성공' if crio_install_result.rc == 0 else '실패' }}: {{ crio_package_name }}"
+  when: 
+    - crio_needs_upgrade
+    - crio_install_result is defined
 
 - name: "CRI-O 설치 실패 시 중단"
   fail:
-    msg: "CRI-O RPM 패키지 설치가 실패했습니다"
+    msg: "CRI-O RPM 패키지 설치가 실패했습니다: {{ crio_package_name }}"
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
     - opensuse_crio_repo_url is defined
     - opensuse_crio_repo_url != ""
-    - ((crio_install_result is defined and crio_install_result.failed) or 
-       (crio_fallback_install_result is defined and crio_fallback_install_result.failed))
+    - crio_install_result is defined
+    - crio_install_result.failed
 
 # CRI-O 설정 업데이트
 - name: "CRI-O 설정 백업"
