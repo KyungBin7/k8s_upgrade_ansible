@@ -152,5 +152,5 @@ k8s_health_checks:
   api_server: "kubectl version --short"
 
 # CRI-O 저장소 설정
-k8s_opensuse_crio_base_url: "https://download.opensuse.org/repositories/devel:/kubic:/libcontainers:/stable:/cri-o"
+k8s_opensuse_crio_base_url: "https://download.opensuse.org/repositories/devel:kubic:libcontainers:stable:cri-o"
 k8s_opensuse_os_version: "CentOS_8" 

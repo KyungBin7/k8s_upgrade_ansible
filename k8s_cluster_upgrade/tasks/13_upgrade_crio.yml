@@ -14,7 +14,9 @@
 - name: "현재 CRI-O 버전 확인"
   shell: |
     if command -v crio >/dev/null 2>&1; then
-      crio version | grep -E "crio version|RuntimeVersion" | head -1 | awk '{print $NF}' | sed 's/^v//'
+      # crio version 명령어에서 버전 추출 (stdout 또는 stderr 모두 확인)
+      version_output=$(crio version 2>&1)
+      echo "$version_output" | grep -E "(crio version|RuntimeVersion|Starting CRI-O, version)" | head -1 | sed -E 's/.*version:? ([0-9]+\.[0-9]+\.[0-9]+).*/\1/' | sed 's/^v//'
     else
       echo "not_installed"
     fi
@@ -40,53 +42,51 @@
     msg: "CRI-O 목표 버전: {{ crio_target_version | default('N/A') }}"
 
 # OpenSUSE 저장소에서 실제 사용 가능한 CRI-O 버전 확인
-- name: "OpenSUSE 저장소 URL 구성"
+- name: "사용 가능한 CRI-O 패치 버전 목록 정의"
   set_fact:
-    opensuse_crio_repo_url: "{{ k8s_opensuse_crio_base_url }}:/{{ crio_minor_version }}:/{{ k8s_opensuse_os_version }}/x86_64/"
+    crio_patch_versions: ["{{ crio_minor_version }}.6", "{{ crio_minor_version }}.5", "{{ crio_minor_version }}.4", "{{ crio_minor_version }}.3", "{{ crio_minor_version }}.2", "{{ crio_minor_version }}.1"]
   when: 
     - crio_target_version is defined
     - crio_minor_version is defined
     - crio_opensuse_available | default(false)
 
-- name: "OpenSUSE 저장소 URL 확인"
-  debug:
-    msg: "OpenSUSE CRI-O 저장소 URL: {{ opensuse_crio_repo_url | default('N/A') }}"
-  when: 
-    - crio_target_version is defined
-    - crio_minor_version is defined
-    - crio_opensuse_available | default(false)
-
-- name: "OpenSUSE 저장소에서 사용 가능한 CRI-O 패키지 목록 확인"
+- name: "OpenSUSE 저장소에서 사용 가능한 CRI-O 버전 확인"
   uri:
-    url: "{{ opensuse_crio_repo_url }}"
+    url: "{{ k8s_opensuse_crio_base_url }}:{{ item }}/{{ k8s_opensuse_os_version }}/x86_64/"
     method: GET
     status_code: [200, 404]
-  register: opensuse_package_list_check
+  register: opensuse_version_check
+  loop: "{{ crio_patch_versions }}"
   when: 
     - crio_target_version is defined
     - crio_minor_version is defined
     - crio_opensuse_available | default(false)
-    - opensuse_crio_repo_url is defined
+    - crio_patch_versions is defined
   ignore_errors: true
 
-- name: "실제 사용 가능한 최신 CRI-O 버전 추출"
+- name: "사용 가능한 첫 번째 CRI-O 버전 선택"
   set_fact:
-    crio_actual_version: "{{ opensuse_package_list_check.content | default('') | regex_findall('cri-o-(' + crio_minor_version + '\\.[0-9]+)[^\"]*\\.rpm') | sort | last }}"
+    crio_actual_version: "{{ item.item }}"
+    opensuse_crio_repo_url: "{{ k8s_opensuse_crio_base_url }}:{{ item.item }}/{{ k8s_opensuse_os_version }}/x86_64/"
+  loop: "{{ opensuse_version_check.results }}"
   when: 
     - crio_target_version is defined
-    - opensuse_package_list_check is defined
-    - opensuse_package_list_check.status == 200
-    - opensuse_package_list_check.content is defined
+    - opensuse_version_check is defined
+    - item.status == 200
+    - crio_actual_version is not defined
+  loop_control:
+    label: "{{ item.item }}"
 
-- name: "버전 추출 결과 디버그"
+- name: "선택된 CRI-O 버전 디버그"
   debug:
     msg:
-      - "검색된 패키지들: {{ opensuse_package_list_check.content | default('') | regex_findall('cri-o-(' + crio_minor_version + '\\.[0-9]+)[^\"]*\\.rpm') }}"
+      - "시도한 버전들: {{ crio_patch_versions | default([]) }}"
       - "선택된 버전: {{ crio_actual_version | default('없음') }}"
+      - "선택된 저장소 URL: {{ opensuse_crio_repo_url | default('N/A') }}"
   when: 
     - crio_target_version is defined
-    - opensuse_package_list_check is defined
-    - opensuse_package_list_check.status == 200
+    - crio_minor_version is defined
+    - crio_opensuse_available | default(false)
 
 - name: "실제 CRI-O 목표 버전 설정"
   set_fact:
@@ -165,7 +165,7 @@
       - "OpenSUSE 저장소 지원: {{ crio_opensuse_available | default(false) }}"
       - "패키지 관리자: {{ k8s_detected_package_manager | default('unknown') }}"
       - "공식 저장소 사용 가능: {{ crio_available_in_repo | default(false) }}"
-      - "OpenSUSE URL: {{ k8s_opensuse_crio_base_url }}:/{{ crio_minor_version | default('N/A') }}:/{{ crio_target_version | default('N/A') }}/{{ k8s_opensuse_os_version }}/"
+      - "OpenSUSE URL: {{ opensuse_crio_repo_url | default('N/A') }}"
       - "Fallback 패키지: {{ crio_fallback_package | default('N/A') }}"
   when: crio_needs_upgrade
 
@@ -235,16 +235,15 @@
 
 - name: "OpenSUSE 저장소에서 CRI-O 바이너리 다운로드 URL 확인"
   uri:
-    url: "{{ k8s_opensuse_crio_base_url }}:/{{ crio_minor_version }}:/{{ crio_target_version }}/{{ k8s_opensuse_os_version }}/"
+    url: "{{ opensuse_crio_repo_url | default('') | regex_replace('/x86_64/$', '/') }}"
     method: GET
     status_code: [200, 404]
   register: opensuse_repo_check
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
-    - crio_opensuse_available | default(false)
-    - crio_minor_version is defined
-    - crio_target_version is defined
+    - opensuse_crio_repo_url is defined
+    - opensuse_crio_repo_url != ""
   ignore_errors: true
 
 - name: "OpenSUSE 저장소 응답 확인"
@@ -264,7 +263,8 @@
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
-    - opensuse_crio_available | default(false)
+    - opensuse_crio_repo_url is defined
+    - opensuse_crio_repo_url != ""
 
 - name: "표준 CRI-O RPM 패키지명 생성"
   set_fact:
@@ -272,30 +272,33 @@
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
-    - opensuse_crio_available | default(false)
+    - opensuse_crio_repo_url is defined
+    - opensuse_crio_repo_url != ""
 
 - name: "표준 CRI-O RPM 패키지 다운로드 시도"
   get_url:
-    url: "{{ k8s_opensuse_crio_base_url }}:/{{ crio_minor_version }}:/{{ crio_target_version }}/{{ k8s_opensuse_os_version }}/x86_64/{{ crio_fallback_package }}"
+    url: "{{ opensuse_crio_repo_url }}/{{ crio_fallback_package }}"
     dest: "/tmp/crio-upgrade/{{ crio_fallback_package }}"
     mode: '0644'
   register: crio_fallback_download
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
-    - opensuse_crio_available | default(false)
+    - opensuse_crio_repo_url is defined
+    - opensuse_crio_repo_url != ""
     - crio_fallback_package is defined
   ignore_errors: true
 
 - name: "OpenSUSE 저장소에서 사용 가능한 CRI-O 패키지 목록 확인"
   uri:
-    url: "{{ k8s_opensuse_crio_base_url }}:/{{ crio_minor_version }}:/{{ crio_target_version }}/{{ k8s_opensuse_os_version }}/x86_64/"
+    url: "{{ opensuse_crio_repo_url }}"
     method: GET
   register: opensuse_package_list
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
-    - opensuse_crio_available | default(false)
+    - opensuse_crio_repo_url is defined
+    - opensuse_crio_repo_url != ""
 
 - name: "사용 가능한 CRI-O 패키지 파일명 추출"
   set_fact:
@@ -303,7 +306,8 @@
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
-    - opensuse_crio_available | default(false)
+    - opensuse_crio_repo_url is defined
+    - opensuse_crio_repo_url != ""
     - opensuse_package_list is defined
     - opensuse_package_list.content is defined
 
@@ -313,17 +317,19 @@
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
-    - opensuse_crio_available | default(false)
+    - opensuse_crio_repo_url is defined
+    - opensuse_crio_repo_url != ""
 
 - name: "실제 CRI-O RPM 패키지 다운로드"
   get_url:
-    url: "{{ k8s_opensuse_crio_base_url }}:/{{ crio_minor_version }}:/{{ crio_target_version }}/{{ k8s_opensuse_os_version }}/x86_64/{{ crio_package_name }}"
+    url: "{{ opensuse_crio_repo_url }}/{{ crio_package_name }}"
     dest: "/tmp/crio-upgrade/{{ crio_package_name }}"
     mode: '0644'
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
-    - opensuse_crio_available | default(false)
+    - opensuse_crio_repo_url is defined
+    - opensuse_crio_repo_url != ""
     - crio_package_name is defined
     - crio_package_name != ""
 
@@ -336,7 +342,8 @@
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
-    - opensuse_crio_available | default(false)
+    - opensuse_crio_repo_url is defined
+    - opensuse_crio_repo_url != ""
     - crio_package_name is defined
     - crio_package_name != ""
 
@@ -349,7 +356,8 @@
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
-    - opensuse_crio_available | default(false)
+    - opensuse_crio_repo_url is defined
+    - opensuse_crio_repo_url != ""
     - (crio_package_name is not defined or crio_package_name == "")
     - crio_fallback_download is defined
     - not crio_fallback_download.failed
@@ -368,7 +376,8 @@
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
-    - opensuse_crio_available | default(false)
+    - opensuse_crio_repo_url is defined
+    - opensuse_crio_repo_url != ""
     - ((crio_install_result is defined and crio_install_result.failed) or 
        (crio_fallback_install_result is defined and crio_fallback_install_result.failed))
 
@@ -421,7 +430,13 @@
 # 업그레이드 후 검증
 - name: "업그레이드된 CRI-O 버전 확인"
   shell: |
-    crio version | grep -E "crio version|RuntimeVersion" | head -1 | awk '{print $NF}' | sed 's/^v//'
+    if command -v crio >/dev/null 2>&1; then
+      # crio version 명령어에서 버전 추출 (stdout 또는 stderr 모두 확인)
+      version_output=$(crio version 2>&1)
+      echo "$version_output" | grep -E "(crio version|RuntimeVersion|Starting CRI-O, version)" | head -1 | sed -E 's/.*version:? ([0-9]+\.[0-9]+\.[0-9]+).*/\1/' | sed 's/^v//'
+    else
+      echo "not_installed"
+    fi
   register: crio_upgraded_version
   when: crio_needs_upgrade
   changed_when: false
