@@ -40,9 +40,25 @@
     msg: "CRI-O 목표 버전: {{ crio_target_version | default('N/A') }}"
 
 # OpenSUSE 저장소에서 실제 사용 가능한 CRI-O 버전 확인
+- name: "OpenSUSE 저장소 URL 구성"
+  set_fact:
+    opensuse_crio_repo_url: "{{ k8s_opensuse_crio_base_url }}:/{{ crio_minor_version }}:/{{ k8s_opensuse_os_version }}/x86_64/"
+  when: 
+    - crio_target_version is defined
+    - crio_minor_version is defined
+    - crio_opensuse_available | default(false)
+
+- name: "OpenSUSE 저장소 URL 확인"
+  debug:
+    msg: "OpenSUSE CRI-O 저장소 URL: {{ opensuse_crio_repo_url | default('N/A') }}"
+  when: 
+    - crio_target_version is defined
+    - crio_minor_version is defined
+    - crio_opensuse_available | default(false)
+
 - name: "OpenSUSE 저장소에서 사용 가능한 CRI-O 패키지 목록 확인"
   uri:
-    url: "{{ k8s_opensuse_crio_base_url }}:/{{ crio_minor_version }}:/{{ k8s_opensuse_os_version }}/x86_64/"
+    url: "{{ opensuse_crio_repo_url }}"
     method: GET
     status_code: [200, 404]
   register: opensuse_package_list_check
@@ -50,6 +66,7 @@
     - crio_target_version is defined
     - crio_minor_version is defined
     - crio_opensuse_available | default(false)
+    - opensuse_crio_repo_url is defined
   ignore_errors: true
 
 - name: "실제 사용 가능한 최신 CRI-O 버전 추출"
@@ -60,6 +77,16 @@
     - opensuse_package_list_check is defined
     - opensuse_package_list_check.status == 200
     - opensuse_package_list_check.content is defined
+
+- name: "버전 추출 결과 디버그"
+  debug:
+    msg:
+      - "검색된 패키지들: {{ opensuse_package_list_check.content | default('') | regex_findall('cri-o-(' + crio_minor_version + '\\.[0-9]+)[^\"]*\\.rpm') }}"
+      - "선택된 버전: {{ crio_actual_version | default('없음') }}"
+  when: 
+    - crio_target_version is defined
+    - opensuse_package_list_check is defined
+    - opensuse_package_list_check.status == 200
 
 - name: "실제 CRI-O 목표 버전 설정"
   set_fact:
@@ -147,7 +174,15 @@
   systemd:
     name: crio
     state: stopped
+  register: crio_stop_result
   when: crio_needs_upgrade
+
+- name: "CRI-O 서비스 중지 확인"
+  debug:
+    msg: "CRI-O 서비스 중지 {{ '성공' if not crio_stop_result.failed else '실패' }}"
+  when: 
+    - crio_needs_upgrade
+    - crio_stop_result is defined
 
 # 방법 1: 공식 저장소에서 CRI-O 업그레이드
 - name: "공식 저장소에서 CRI-O 업그레이드 (Rocky/RHEL)"
@@ -155,6 +190,7 @@
     name: "cri-o-{{ crio_target_version }}*"
     state: present
     update_cache: yes
+  register: crio_official_yum_install
   when: 
     - crio_needs_upgrade
     - k8s_detected_package_manager == 'yum'
@@ -165,10 +201,29 @@
     name: "cri-o={{ crio_target_version }}*"
     state: present
     update_cache: yes
+  register: crio_official_apt_install
   when: 
     - crio_needs_upgrade
     - k8s_detected_package_manager == 'apt'
     - crio_available_in_repo | default(false)
+
+- name: "공식 저장소 CRI-O 설치 결과 확인"
+  debug:
+    msg: 
+      - "YUM 설치: {{ 'N/A' if crio_official_yum_install is not defined else ('성공' if not crio_official_yum_install.failed else '실패') }}"
+      - "APT 설치: {{ 'N/A' if crio_official_apt_install is not defined else ('성공' if not crio_official_apt_install.failed else '실패') }}"
+  when: 
+    - crio_needs_upgrade
+    - crio_available_in_repo | default(false)
+
+- name: "공식 저장소 CRI-O 설치 실패 시 중단"
+  fail:
+    msg: "공식 저장소에서 CRI-O 설치가 실패했습니다"
+  when: 
+    - crio_needs_upgrade
+    - crio_available_in_repo | default(false)
+    - ((crio_official_yum_install is defined and crio_official_yum_install.failed) or 
+       (crio_official_apt_install is defined and crio_official_apt_install.failed))
 
 # 방법 2: 바이너리 방식으로 CRI-O 설치 (공식 저장소에 없는 경우)
 - name: "OpenSUSE 저장소 사용 가능성 확인"
@@ -277,6 +332,7 @@
     name: "/tmp/crio-upgrade/{{ crio_package_name }}"
     state: present
     disable_gpg_check: yes
+  register: crio_install_result
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
@@ -289,6 +345,7 @@
     name: "/tmp/crio-upgrade/{{ crio_fallback_package }}"
     state: present
     disable_gpg_check: yes
+  register: crio_fallback_install_result
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
@@ -297,6 +354,23 @@
     - crio_fallback_download is defined
     - not crio_fallback_download.failed
     - crio_fallback_package is defined
+
+- name: "CRI-O 패키지 설치 결과 확인"
+  debug:
+    msg: 
+      - "주 패키지 설치: {{ 'N/A' if crio_install_result is not defined else ('성공' if crio_install_result.rc == 0 else '실패') }}"
+      - "Fallback 패키지 설치: {{ 'N/A' if crio_fallback_install_result is not defined else ('성공' if crio_fallback_install_result.rc == 0 else '실패') }}"
+  when: crio_needs_upgrade
+
+- name: "CRI-O 설치 실패 시 중단"
+  fail:
+    msg: "CRI-O RPM 패키지 설치가 실패했습니다"
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+    - opensuse_crio_available | default(false)
+    - ((crio_install_result is defined and crio_install_result.failed) or 
+       (crio_fallback_install_result is defined and crio_fallback_install_result.failed))
 
 # CRI-O 설정 업데이트
 - name: "CRI-O 설정 백업"
@@ -317,18 +391,32 @@
   notify:
     - restart crio
 
-# CRI-O 서비스 시작 및 활성화
+# CRI-O 서비스 재시작 및 활성화
 - name: "systemd 데몬 리로드"
   systemd:
     daemon_reload: yes
   when: crio_needs_upgrade
 
-- name: "CRI-O 서비스 시작 및 활성화"
+- name: "CRI-O 서비스 재시작 및 활성화"
   systemd:
     name: crio
-    state: started
+    state: restarted
     enabled: yes
+  register: crio_restart_result
   when: crio_needs_upgrade
+
+- name: "CRI-O 서비스 재시작 대기"
+  wait_for:
+    path: /var/run/crio/crio.sock
+    timeout: 60
+  when: crio_needs_upgrade
+
+- name: "CRI-O 서비스 재시작 결과 확인"
+  debug:
+    msg: "CRI-O 서비스 재시작 {{ '성공' if crio_restart_result.status.ActiveState == 'active' else '실패' }}"
+  when: 
+    - crio_needs_upgrade
+    - crio_restart_result is defined
 
 # 업그레이드 후 검증
 - name: "업그레이드된 CRI-O 버전 확인"
@@ -337,6 +425,8 @@
   register: crio_upgraded_version
   when: crio_needs_upgrade
   changed_when: false
+  retries: 3
+  delay: 5
 
 - name: "CRI-O 서비스 상태 확인"
   systemd:
@@ -350,12 +440,50 @@
   register: crio_socket_status
   when: crio_needs_upgrade
 
+- name: "CRI-O 업그레이드 성공 여부 확인"
+  set_fact:
+    crio_upgrade_success: "{{ crio_upgraded_version.stdout == crio_target_version }}"
+  when: 
+    - crio_needs_upgrade
+    - crio_upgraded_version is defined
+
+- name: "CRI-O 업그레이드 실패 경고"
+  debug:
+    msg:
+      - "경고: CRI-O 업그레이드가 완전히 완료되지 않았습니다!"
+      - "목표 버전: {{ crio_target_version }}"
+      - "현재 버전: {{ crio_upgraded_version.stdout | default('확인 불가') }}"
+      - "수동으로 'systemctl restart crio'와 'systemctl restart kubelet'을 실행하세요."
+  when: 
+    - crio_needs_upgrade
+    - not (crio_upgrade_success | default(false))
+
 # kubelet과 CRI-O 연결 테스트
 - name: "kubelet 서비스 재시작 (CRI-O 연결 갱신)"
   systemd:
     name: kubelet
     state: restarted
   when: crio_needs_upgrade
+  register: kubelet_restart_result
+
+- name: "kubelet 재시작 후 대기"
+  pause:
+    seconds: 10
+  when: crio_needs_upgrade
+
+- name: "kubelet 서비스 상태 확인"
+  systemd:
+    name: kubelet
+  register: kubelet_service_status
+  when: crio_needs_upgrade
+
+- name: "CRI-O와 kubelet 연결 테스트"
+  shell: |
+    timeout 30 crictl info >/dev/null 2>&1 && echo "연결 성공" || echo "연결 실패"
+  register: crio_kubelet_connection
+  when: crio_needs_upgrade
+  changed_when: false
+  ignore_errors: true
 
 - name: "CRI-O 업그레이드 결과 표시"
   debug:
@@ -363,8 +491,11 @@
       - "=== CRI-O 업그레이드 완료 ==="
       - "이전 버전: {{ crio_current_version.stdout }}"
       - "업그레이드된 버전: {{ crio_upgraded_version.stdout | default('확인 불가') }}"
-      - "서비스 상태: {{ crio_service_status.status.ActiveState | default('확인 불가') }}"
+      - "업그레이드 성공: {{ crio_upgrade_success | default(false) }}"
+      - "CRI-O 서비스 상태: {{ crio_service_status.status.ActiveState | default('확인 불가') }}"
+      - "kubelet 서비스 상태: {{ kubelet_service_status.status.ActiveState | default('확인 불가') }}"
       - "소켓 파일 존재: {{ crio_socket_status.stat.exists | default(false) }}"
+      - "CRI-O/kubelet 연결: {{ crio_kubelet_connection.stdout | default('확인 불가') }}"
   when: crio_needs_upgrade
 
 # 임시 파일 정리
