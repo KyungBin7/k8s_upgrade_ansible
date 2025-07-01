@@ -277,14 +277,23 @@
     - opensuse_crio_repo_url is defined
     - opensuse_crio_repo_url != ""
 
+- name: "저장소 응답 확인 (디버깅)"
+  debug:
+    msg: 
+      - "저장소 응답 상태: {{ opensuse_package_list.status | default('미정의') }}"
+      - "응답 내용 길이: {{ opensuse_package_list.content | default('') | length }}"
+      - "opensuse_package_list 정의 여부: {{ opensuse_package_list is defined }}"
+      - "content 정의 여부: {{ opensuse_package_list.content is defined if opensuse_package_list is defined else '패키지 목록 미정의' }}"
+  when: 
+    - crio_needs_upgrade
+    - not (crio_available_in_repo | default(false))
+
 - name: "사용 가능한 CRI-O 패키지 파일명 추출 (cri-o로 시작하는 rpm 파일)"
   set_fact:
     crio_package_name: "{{ opensuse_package_list.content | default('') | regex_search('cri-o-[^\"\\s<>]*\\.rpm') }}"
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
-    - opensuse_crio_repo_url is defined
-    - opensuse_crio_repo_url != ""
     - opensuse_package_list is defined
     - opensuse_package_list.content is defined
 
@@ -294,8 +303,6 @@
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
-    - opensuse_crio_repo_url is defined
-    - opensuse_crio_repo_url != ""
     - opensuse_package_list is defined
     - opensuse_package_list.content is defined
     - (crio_package_name is not defined or crio_package_name == "")
@@ -304,15 +311,12 @@
   debug:
     msg: 
       - "저장소 URL: {{ opensuse_crio_repo_url }}"
-      - "HTML 내용 일부: {{ opensuse_package_list.content[:500] }}..."
+      - "HTML 내용 일부: {{ opensuse_package_list.content[:500] if opensuse_package_list.content is defined and opensuse_package_list.content | length > 0 else '내용 없음' }}..."
+      - "첫 번째 패턴 결과: {{ opensuse_package_list.content | default('') | regex_search('cri-o-[^\"\\s<>]*\\.rpm') | default('없음') }}"
+      - "두 번째 패턴 결과: {{ opensuse_package_list.content | default('') | regex_search('href=\"([^\"]*cri-o[^\"]*\\.rpm)\"', '\\1') | first | default('없음') }}"
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
-    - opensuse_crio_repo_url is defined
-    - opensuse_crio_repo_url != ""
-    - opensuse_package_list is defined
-    - opensuse_package_list.content is defined
-    - (crio_package_name is not defined or crio_package_name == "")
 
 - name: "CRI-O 패키지 파일명 확인"
   debug:
