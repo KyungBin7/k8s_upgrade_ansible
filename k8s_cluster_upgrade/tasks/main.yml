@@ -54,12 +54,14 @@
   tags:
     - backup
 
-# 07.5. CRI-O 컨테이너 런타임 업그레이드
-- name: "07.5. CRI-O 컨테이너 런타임 업그레이드"
+# 07.5. CRI-O 컨테이너 런타임 업그레이드 (마스터 노드)
+- name: "07.5. CRI-O 컨테이너 런타임 업그레이드 (마스터 노드)"
   include_tasks: 13_upgrade_crio.yml
   when: 
     - not k8s_skip_upgrade
     - k8s_container_runtime == 'crio'
+    - k8s_upgrade_phase | default('') == 'control_plane'
+    - k8s_detected_role == 'master'
   tags:
     - crio
     - runtime
@@ -85,6 +87,18 @@
   tags:
     - control-plane
     - other-masters
+
+# 09.5. CRI-O 컨테이너 런타임 업그레이드 (워커 노드)
+- name: "09.5. CRI-O 컨테이너 런타임 업그레이드 (워커 노드)"
+  include_tasks: 13_upgrade_crio.yml
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_container_runtime == 'crio'
+    - k8s_upgrade_phase | default('') == 'worker'
+    - k8s_detected_role == 'worker'
+  tags:
+    - crio
+    - runtime
 
 # 10. 워커 노드 업그레이드 (worker 단계에서만)
 - name: "10. 워커 노드 업그레이드"
