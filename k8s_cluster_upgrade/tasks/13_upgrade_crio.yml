@@ -266,11 +266,10 @@
     - opensuse_crio_repo_url is defined
     - opensuse_crio_repo_url != ""
 
-- name: "OpenSUSE 저장소에서 사용 가능한 CRI-O 패키지 목록 확인"
-  uri:
-    url: "{{ opensuse_crio_repo_url }}"
-    method: GET
-  register: opensuse_package_list
+- name: "OpenSUSE 저장소에서 사용 가능한 CRI-O 패키지 목록 확인 (curl 사용)"
+  shell: |
+    curl -s -L "{{ opensuse_crio_repo_url }}" || echo "curl_failed"
+  register: opensuse_package_list_curl
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
@@ -280,38 +279,39 @@
 - name: "저장소 응답 확인 (디버깅)"
   debug:
     msg: 
-      - "저장소 응답 상태: {{ opensuse_package_list.status | default('미정의') }}"
-      - "응답 내용 길이: {{ opensuse_package_list.content | default('') | length }}"
-      - "opensuse_package_list 정의 여부: {{ opensuse_package_list is defined }}"
-      - "content 정의 여부: {{ (opensuse_package_list is defined) and (opensuse_package_list.content is defined) }}"
+      - "curl 반환 코드: {{ opensuse_package_list_curl.rc | default('미정의') }}"
+      - "응답 내용 길이: {{ opensuse_package_list_curl.stdout | default('') | length }}"
+      - "응답 내용 일부: {{ opensuse_package_list_curl.stdout[:200] | default('내용 없음') }}..."
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
 
 - name: "사용 가능한 CRI-O 패키지 파일명 추출 (cri-o로 시작하는 rpm 파일)"
   set_fact:
-    crio_package_name: "{{ opensuse_package_list.content | default('') | regex_search('cri-o-[^\"\\s<>]*\\.rpm') }}"
+    crio_package_name: "{{ opensuse_package_list_curl.stdout | default('') | regex_search('cri-o-[^\"\\s<>]*\\.rpm') }}"
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
-    - opensuse_package_list is defined
-    - opensuse_package_list.content is defined
+    - opensuse_package_list_curl is defined
+    - opensuse_package_list_curl.stdout is defined
+    - opensuse_package_list_curl.rc == 0
 
 - name: "HTML에서 href 링크를 통한 CRI-O RPM 파일 찾기 (첫 번째 방법 실패 시)"
   set_fact:
-    crio_package_name: "{{ opensuse_package_list.content | default('') | regex_search('href=\"([^\"]*cri-o[^\"]*\\.rpm)\"', '\\1') | list | first | default('') }}"
+    crio_package_name: "{{ opensuse_package_list_curl.stdout | default('') | regex_search('href=\"([^\"]*cri-o[^\"]*\\.rpm)\"', '\\1') | list | first | default('') }}"
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
-    - opensuse_package_list is defined
-    - opensuse_package_list.content is defined
+    - opensuse_package_list_curl is defined
+    - opensuse_package_list_curl.stdout is defined
+    - opensuse_package_list_curl.rc == 0
     - (crio_package_name is not defined or crio_package_name == "")
 
 - name: "저장소 HTML 내용 디버깅"
   debug:
     msg: 
       - "저장소 URL: {{ opensuse_crio_repo_url | default('정의되지 않음') }}"
-      - "HTML 내용 길이: {{ opensuse_package_list.content | default('') | length }}"
+      - "HTML 내용 길이: {{ opensuse_package_list_curl.stdout | default('') | length }}"
       - "찾은 CRI-O 패키지: {{ crio_package_name | default('없음') }}"
   when: 
     - crio_needs_upgrade
