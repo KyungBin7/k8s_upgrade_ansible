@@ -1,3 +1,4 @@
+- ansible install
 ```bash
 dnf install -y epel-release
 dnf install -y ansible
