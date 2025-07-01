@@ -322,7 +322,7 @@
 
 - name: "실제 CRI-O RPM 패키지 다운로드"
   get_url:
-    url: "{{ opensuse_crio_repo_url }}/{{ crio_package_name }}"
+    url: "{{ opensuse_crio_repo_url }}{{ crio_package_name }}"
     dest: "/tmp/crio-upgrade/{{ crio_package_name }}"
     mode: '0644'
   when: 
