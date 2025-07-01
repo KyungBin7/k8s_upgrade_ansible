@@ -283,7 +283,7 @@
       - "저장소 응답 상태: {{ opensuse_package_list.status | default('미정의') }}"
       - "응답 내용 길이: {{ opensuse_package_list.content | default('') | length }}"
       - "opensuse_package_list 정의 여부: {{ opensuse_package_list is defined }}"
-      - "content 정의 여부: {{ opensuse_package_list.content is defined if opensuse_package_list is defined else '패키지 목록 미정의' }}"
+      - "content 정의 여부: {{ (opensuse_package_list is defined) and (opensuse_package_list.content is defined) }}"
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
