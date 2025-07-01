@@ -18,3 +18,5 @@ ansible all -m ping
 ```bash
 ansible-playbook -i inventory/hosts playbook.yml -v
 ```
+
+### k8s_cluster_rollback playbook은 아직 디버깅중
