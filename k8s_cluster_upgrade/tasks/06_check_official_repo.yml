@@ -36,17 +36,22 @@
   when: ansible_os_family == "Debian"
   ignore_errors: true
 
-# 공식 repo 사용 가능 여부 결정
+# 버전별 공식 repo 지원 여부 확인 (1.28 미만은 공식 repo에서 지원하지 않음)
+- name: "목표 버전이 공식 repo 최소 지원 버전 이상인지 확인"
+  set_fact:
+    k8s_version_supports_official_repo: "{{ k8s_target_minor_for_repo is version('1.28', '>=') }}"
+
+# 공식 repo 사용 가능 여부 결정 - 버전 체크 우선
 - name: "공식 repo 사용 가능 여부 결정 (YUM)"
   set_fact:
-    k8s_use_official_repo: "{{ official_repo_yum_check.status == 200 }}"
+    k8s_use_official_repo: "{{ k8s_version_supports_official_repo and (official_repo_yum_check.status == 200) }}"
   when: 
     - ansible_os_family == "RedHat"
     - official_repo_yum_check is defined
 
 - name: "공식 repo 사용 가능 여부 결정 (APT)"
   set_fact:
-    k8s_use_official_repo: "{{ official_repo_apt_check.status == 200 }}"
+    k8s_use_official_repo: "{{ k8s_version_supports_official_repo and (official_repo_apt_check.status == 200) }}"
   when: 
     - ansible_os_family == "Debian"
     - official_repo_apt_check is defined
@@ -57,11 +62,38 @@
     k8s_use_official_repo: true
   when: k8s_detected_package_manager == 'binary'
 
+# 1.28 미만 버전에서 패키지 매니저 사용 시 강제로 바이너리 모드로 변경
+- name: "1.28 미만 버전 패키지 매니저 감지 시 바이너리 모드로 변경"
+  set_fact:
+    k8s_detected_package_manager: "binary"
+    k8s_use_official_repo: true
+  when: 
+    - not k8s_version_supports_official_repo
+    - k8s_detected_package_manager in ['yum', 'apt']
+
+# 바이너리 설치 필요 변수 설정
+- name: "바이너리 설치 필요 변수 설정"
+  set_fact:
+    k8s_needs_binary_install: true
+    k8s_needs_package_install: false
+  when: k8s_detected_package_manager == 'binary'
+
+- name: "패키지 설치 필요 변수 설정"
+  set_fact:
+    k8s_needs_binary_install: false
+    k8s_needs_package_install: true
+  when: k8s_detected_package_manager in ['yum', 'apt']
+
 # repo 사용 결정 알림
 - name: "공식 repo 사용 결정 알림"
   debug:
     msg: |
-      {% if k8s_use_official_repo | default(false) %}
+      {% if k8s_detected_package_manager == 'binary' %}
+      ✓ Kubernetes 바이너리 설치를 사용하여 {{ k8s_target_version }} 버전으로 업그레이드합니다
+      {% if not k8s_version_supports_official_repo | default(true) %}
+      사유: {{ k8s_target_version }} 버전은 공식 repository에서 지원하지 않음 (최소 1.28 이상)
+      {% endif %}
+      {% elif k8s_use_official_repo | default(false) %}
       ✓ Kubernetes 공식 repository를 사용하여 {{ k8s_target_version }} 버전으로 업그레이드합니다
       Repository: https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_minor_for_repo }}
       {% else %}
@@ -82,6 +114,17 @@
       - "APT Repository: {{ k8s_selected_repo_config.apt.repo_url | default('N/A') }}"
       - "GPG Key: {{ k8s_selected_repo_config.yum.gpg_key | default(k8s_selected_repo_config.apt.keyring_path) | default('N/A') }}"
 
+# 패키지 매니저 정보 최종 표시 
+- name: "최종 패키지 매니저 정보 표시"
+  debug:
+    msg:
+      - "=== 최종 패키지 매니저 정보 ==="
+      - "감지된 패키지 매니저: {{ k8s_detected_package_manager }}"
+      - "바이너리 설치 필요: {{ k8s_needs_binary_install | default(false) }}"
+      - "패키지 설치 필요: {{ k8s_needs_package_install | default(false) }}"
+      - "공식 repo 지원 버전: {{ k8s_version_supports_official_repo | default('N/A') }}"
+      - "공식 repo 사용: {{ k8s_use_official_repo | default(false) }}"
+
 # repo 체크 결과를 파일에 기록
 - name: "repo 체크 결과 기록"
   copy:
@@ -89,9 +132,12 @@
       # Kubernetes Repository Check Results
       Target Version: {{ k8s_target_version }}
       Target Minor Version: {{ k8s_target_minor_for_repo }}
+      Version Supports Official Repo: {{ k8s_version_supports_official_repo | default('N/A') }}
       Use Official Repo: {{ k8s_use_official_repo | default(false) }}
       OS Family: {{ ansible_os_family }}
       Package Manager: {{ k8s_detected_package_manager }}
+      Binary Install Needed: {{ k8s_needs_binary_install | default(false) }}
+      Package Install Needed: {{ k8s_needs_package_install | default(false) }}
       Check Time: {{ ansible_date_time.iso8601 }}
       
       {% if ansible_os_family == "RedHat" and official_repo_yum_check is defined %}
@@ -104,8 +150,11 @@
       APT Repo URL: https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_minor_for_repo }}/deb/
       {% endif %}
       
-      Selected Repository:
-      {% if k8s_use_official_repo | default(false) %}
+      Selected Installation Method:
+      {% if k8s_detected_package_manager == 'binary' %}
+      - Type: Binary Installation
+      - Binary Directory: {{ k8s_bin_dir | default('/usr/local/bin') }}
+      {% elif k8s_use_official_repo | default(false) %}
       - Type: Official Kubernetes Repository
       - URL: {{ k8s_selected_repo_config.yum.repo_baseurl if ansible_os_family == "RedHat" else k8s_selected_repo_config.apt.repo_url }}
       {% else %}
