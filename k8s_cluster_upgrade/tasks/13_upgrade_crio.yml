@@ -52,7 +52,7 @@
 
 - name: "OpenSUSE 저장소에서 사용 가능한 CRI-O 버전 확인"
   uri:
-    url: "{{ k8s_opensuse_crio_base_url }}{{ crio_minor_version }}:/{{ item }}/{{ k8s_opensuse_os_version }}/x86_64/"
+    url: "{{ k8s_opensuse_crio_base_url }}/{{ crio_minor_version }}:/{{ item }}/{{ k8s_opensuse_os_version }}/x86_64/"
     method: GET
     status_code: [200, 404]
   register: opensuse_version_check
@@ -67,7 +67,7 @@
 - name: "사용 가능한 첫 번째 CRI-O 버전 선택"
   set_fact:
     crio_actual_version: "{{ item.item }}"
-    opensuse_crio_repo_url: "{{ k8s_opensuse_crio_base_url }}{{ crio_minor_version }}:/{{ item.item }}/{{ k8s_opensuse_os_version }}/x86_64/"
+    opensuse_crio_repo_url: "{{ k8s_opensuse_crio_base_url }}/{{ crio_minor_version }}:/{{ item.item }}/{{ k8s_opensuse_os_version }}/x86_64/"
   loop: "{{ opensuse_version_check.results }}"
   when: 
     - crio_target_version is defined
