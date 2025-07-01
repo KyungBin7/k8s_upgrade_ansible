@@ -24,10 +24,31 @@
     - not k8s_skip_upgrade
     - cluster_version_check is defined
 
+# API 서버 준비 상태 대기
+- name: "API 서버 준비 상태 대기"
+  shell: kubectl cluster-info --request-timeout=5s
+  register: api_ready_check
+  retries: 12
+  delay: 10
+  until: api_ready_check.rc == 0
+  when: not k8s_skip_upgrade
+  delegate_to: "{{ groups['control_plane'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
+  ignore_errors: true
+
+- name: "API 서버 준비 완료 확인"
+  debug:
+    msg: "API 서버 {{ '준비 완료' if api_ready_check.rc == 0 else '응답 없음 - 계속 진행' }}"
+  when: 
+    - not k8s_skip_upgrade
+    - api_ready_check is defined
+
 # 모든 노드 상태 확인
 - name: "모든 노드 상태 확인"
-  command: kubectl get nodes
+  command: kubectl get nodes --request-timeout=30s
   register: all_nodes_status
+  retries: 5
+  delay: 10
+  until: all_nodes_status.rc == 0
   when: not k8s_skip_upgrade
   delegate_to: "{{ groups['control_plane'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
 
@@ -40,8 +61,11 @@
 
 # Ready 상태가 아닌 노드 확인
 - name: "Ready 상태가 아닌 노드 확인"
-  shell: kubectl get nodes --no-headers | grep -v Ready | wc -l
+  shell: kubectl get nodes --no-headers --request-timeout=30s | grep -v Ready | wc -l
   register: not_ready_nodes
+  retries: 3
+  delay: 5
+  until: not_ready_nodes.rc == 0
   when: not k8s_skip_upgrade
   delegate_to: "{{ groups['control_plane'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
 
@@ -54,8 +78,11 @@
 
 # 시스템 파드 상태 확인
 - name: "시스템 파드 상태 확인"
-  command: kubectl get pods -n kube-system
+  command: kubectl get pods -n kube-system --request-timeout=30s
   register: system_pods_status
+  retries: 3
+  delay: 5
+  until: system_pods_status.rc == 0
   when: not k8s_skip_upgrade
   delegate_to: "{{ groups['control_plane'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
 
@@ -68,8 +95,11 @@
 
 # Running 상태가 아닌 시스템 파드 확인
 - name: "Running 상태가 아닌 시스템 파드 확인"
-  shell: kubectl get pods -n kube-system --no-headers | grep -v Running | grep -v Completed | wc -l
+  shell: kubectl get pods -n kube-system --no-headers --request-timeout=30s | grep -v Running | grep -v Completed | wc -l
   register: not_running_system_pods
+  retries: 3
+  delay: 5
+  until: not_running_system_pods.rc == 0
   when: not k8s_skip_upgrade
   delegate_to: "{{ groups['control_plane'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
 
@@ -82,8 +112,11 @@
 
 # CoreDNS 상태 확인
 - name: "CoreDNS 파드 상태 확인"
-  shell: kubectl get pods -n kube-system -l k8s-app=kube-dns -o jsonpath='{.items[*].status.phase}'
+  shell: kubectl get pods -n kube-system -l k8s-app=kube-dns -o jsonpath='{.items[*].status.phase}' --request-timeout=30s
   register: coredns_status
+  retries: 3
+  delay: 5
+  until: coredns_status.rc == 0
   when: not k8s_skip_upgrade
   delegate_to: "{{ groups['control_plane'][0] if k8s_detected_role == 'worker' else inventory_hostname }}"
 
@@ -96,8 +129,11 @@
 
 # API 서버 상태 확인
 - name: "API 서버 헬스체크"
-  shell: kubectl cluster-info
+  shell: kubectl cluster-info --request-timeout=30s
   register: api_server_health
+  retries: 3
+  delay: 5
+  until: api_server_health.rc == 0
   when: 
     - not k8s_skip_upgrade
     - k8s_detected_role == "master"
@@ -183,8 +219,12 @@
       --restart=Never \
       --rm -i \
       --timeout=60s \
+      --request-timeout=30s \
       -- nslookup kubernetes.default.svc.cluster.local
   register: networking_test
+  retries: 2
+  delay: 10
+  until: networking_test.rc == 0
   when: 
     - not k8s_skip_upgrade
     - k8s_detected_role == "master"
