@@ -1,6 +1,6 @@
 ---
 galaxy_info:
-  author: "MetaNet DevOps Team"
+  author: "jkb"
   description: "Kubernetes 클러스터 업그레이드를 위한 재사용 가능한 Ansible Role"
   company: "MetaNet"
   license: "MIT"

@@ -3,7 +3,7 @@
 # 사용법: ansible-playbook -i inventory/hosts playbook.yml
 
 # 1단계: 마스터 노드 업그레이드 (순차적)
-- name: "🏗️  Kubernetes 마스터 노드 업그레이드"
+- name: "Kubernetes 마스터 노드 업그레이드"
   hosts: control_plane
   become: yes
   gather_facts: yes
@@ -111,7 +111,7 @@
         enabled: yes
 
 # 2단계: 워커 노드 업그레이드 (순차적, 마스터 완료 후)
-- name: "🚀 Kubernetes 워커 노드 업그레이드"
+- name: "Kubernetes 워커 노드 업그레이드"
   hosts: workers
   become: yes
   gather_facts: yes

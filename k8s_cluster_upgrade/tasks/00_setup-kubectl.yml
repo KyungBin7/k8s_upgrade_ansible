@@ -13,7 +13,7 @@
 # 4. 체크 모드로 먼저 확인
 #ansible-playbook -i inventory/hosts k8s_cluster_upgrade/tasks/00_setup-kubectl.yml --check
 
-- name: "🔧 Kubernetes admin.conf 배포 및 kubectl 설정"
+- name: "Kubernetes admin.conf 배포 및 kubectl 설정"
   hosts: all
   become: yes
   gather_facts: yes
@@ -23,18 +23,18 @@
     admin_conf_path: "/etc/kubernetes/admin.conf"
     
   tasks:
-    - name: "📋 작업 시작 로그"
+    - name: "작업 시작 로그"
       debug:
         msg: "{{ inventory_hostname }}에서 kubectl 설정을 시작합니다"
 
     # 첫 번째 마스터 노드에서 admin.conf 존재 확인
-    - name: "🔍 첫 번째 마스터에서 admin.conf 파일 존재 확인"
+    - name: "첫 번째 마스터에서 admin.conf 파일 존재 확인"
       stat:
         path: "{{ admin_conf_path }}"
       register: admin_conf_stat
       when: inventory_hostname == first_master
       
-    - name: "❌ admin.conf 파일이 존재하지 않으면 실패"
+    - name: "admin.conf 파일이 존재하지 않으면 실패"
       fail:
         msg: "{{ admin_conf_path }} 파일이 첫 번째 마스터 노드에 존재하지 않습니다"
       when: 
@@ -42,7 +42,7 @@
         - not admin_conf_stat.stat.exists
 
     # 첫 번째 마스터가 아닌 노드들을 위한 작업
-    - name: "📁 .kube 디렉토리 생성"
+    - name: ".kube 디렉토리 생성"
       file:
         path: "{{ ansible_env.HOME }}/.kube"
         state: directory
@@ -61,7 +61,7 @@
       when: inventory_hostname != first_master
 
     # 첫 번째 마스터에서 admin.conf 내용 읽기
-    - name: "📥 첫 번째 마스터에서 admin.conf 내용 읽기"
+    - name: "첫 번째 마스터에서 admin.conf 내용 읽기"
       slurp:
         src: "{{ admin_conf_path }}"
       register: admin_conf_content
@@ -69,7 +69,7 @@
       run_once: true
 
     # 다른 노드들에게 admin.conf 복사
-    - name: "📤 admin.conf를 다른 노드들에 복사"
+    - name: "admin.conf를 다른 노드들에 복사"
       copy:
         content: "{{ admin_conf_content.content | b64decode }}"
         dest: "/root/admin.conf"
@@ -79,7 +79,7 @@
       when: inventory_hostname != first_master
 
     # 사용자 홈 디렉토리에 kubectl config 설정
-    - name: "🔧 사용자 홈에 kubectl config 복사"
+    - name: "사용자 홈에 kubectl config 복사"
       copy:
         src: "/root/admin.conf"
         dest: "{{ ansible_env.HOME }}/.kube/config"
@@ -90,7 +90,7 @@
       when: inventory_hostname != first_master
 
     # root 사용자에게도 kubectl config 설정
-    - name: "🔧 root 사용자에게 kubectl config 복사"
+    - name: "root 사용자에게 kubectl config 복사"
       copy:
         src: "/root/admin.conf"
         dest: "/root/.kube/config"
@@ -101,9 +101,9 @@
       when: inventory_hostname != first_master
 
     # 첫 번째 마스터 노드에서도 .kube/config 설정
-    - name: "🔧 첫 번째 마스터에서 kubectl config 설정"
+    - name: "첫 번째 마스터에서 kubectl config 설정"
       block:
-        - name: "📁 첫 번째 마스터 .kube 디렉토리 생성"
+        - name: "첫 번째 마스터 .kube 디렉토리 생성"
           file:
             path: "{{ ansible_env.HOME }}/.kube"
             state: directory
@@ -111,7 +111,7 @@
             owner: "{{ ansible_user_id }}"
             group: "{{ ansible_user_gid }}"
 
-        - name: "📁 첫 번째 마스터 root .kube 디렉토리 생성"
+        - name: "첫 번째 마스터 root .kube 디렉토리 생성"
           file:
             path: "/root/.kube"
             state: directory
@@ -119,7 +119,7 @@
             owner: root
             group: root
 
-        - name: "🔧 첫 번째 마스터 사용자 홈에 kubectl config 복사"
+        - name: "첫 번째 마스터 사용자 홈에 kubectl config 복사"
           copy:
             src: "{{ admin_conf_path }}"
             dest: "{{ ansible_env.HOME }}/.kube/config"
@@ -128,7 +128,7 @@
             group: "{{ ansible_user_gid }}"
             remote_src: yes
 
-        - name: "🔧 첫 번째 마스터 root에 kubectl config 복사"
+        - name: "첫 번째 마스터 root에 kubectl config 복사"
           copy:
             src: "{{ admin_conf_path }}"
             dest: "/root/.kube/config"
@@ -139,7 +139,7 @@
       when: inventory_hostname == first_master
 
     # KUBECONFIG 환경변수 설정 (.bashrc)
-    - name: "🌍 사용자 .bashrc에 KUBECONFIG 환경변수 추가"
+    - name: "사용자 .bashrc에 KUBECONFIG 환경변수 추가"
       lineinfile:
         path: "{{ ansible_env.HOME }}/.bashrc"
         line: 'export KUBECONFIG="$HOME/.kube/config"'
@@ -149,7 +149,7 @@
       when: ansible_env.HOME != "/root"
 
     # root 사용자 .bashrc에도 환경변수 설정
-    - name: "🌍 root .bashrc에 KUBECONFIG 환경변수 추가"
+    - name: "root .bashrc에 KUBECONFIG 환경변수 추가"
       lineinfile:
         path: "/root/.bashrc"
         line: 'export KUBECONFIG="$HOME/.kube/config"'
@@ -158,7 +158,7 @@
         backup: yes
 
     # kubectl 연결 테스트
-    - name: "🔍 kubectl 연결 테스트"
+    - name: "kubectl 연결 테스트"
       shell: |
         export KUBECONFIG="$HOME/.kube/config"
         kubectl cluster-info
@@ -166,20 +166,20 @@
       failed_when: false
       changed_when: false
 
-    - name: "✅ kubectl 연결 테스트 결과"
+    - name: "kubectl 연결 테스트 결과"
       debug:
         msg: 
           - "kubectl 연결 테스트 {{ '성공' if kubectl_test.rc == 0 else '실패' }}"
           - "{{ kubectl_test.stdout_lines if kubectl_test.rc == 0 else kubectl_test.stderr_lines }}"
 
     # 노드별 admin.conf 임시 파일 정리
-    - name: "🧹 노드 임시 파일 정리"
+    - name: "노드 임시 파일 정리"
       file:
         path: "/root/admin.conf"
         state: absent
       when: inventory_hostname != first_master
 
-    - name: "✅ 작업 완료 로그"
+    - name: "작업 완료 로그"
       debug:
         msg: "{{ inventory_hostname }}에서 kubectl 설정이 완료되었습니다"
 
