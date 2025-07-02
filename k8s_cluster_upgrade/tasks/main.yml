@@ -54,6 +54,18 @@
   tags:
     - backup
 
+# 07.5. CRI-O 컨테이너 런타임 업그레이드 (마스터 노드)
+- name: "07.5. CRI-O 컨테이너 런타임 업그레이드 (마스터 노드)"
+  include_tasks: 13_upgrade_crio.yml
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_container_runtime == 'crio'
+    - k8s_upgrade_phase | default('') == 'control_plane'
+    - k8s_detected_role == 'master'
+  tags:
+    - crio
+    - runtime
+
 # 08. 마스터 노드 업그레이드 (control_plane 단계에서만)
 - name: "08. 첫 번째 컨트롤 플레인 업그레이드"
   include_tasks: 08_upgrade_control_plane.yml
@@ -64,19 +76,6 @@
   tags:
     - control-plane
     - master
-
-# 08.5. CRI-O 컨테이너 런타임 업그레이드 (첫 번째 마스터 노드)
-- name: "08.5. CRI-O 컨테이너 런타임 업그레이드 (첫 번째 마스터 노드)"
-  include_tasks: 13_upgrade_crio.yml
-  when: 
-    - not k8s_skip_upgrade
-    - k8s_container_runtime == 'crio'
-    - k8s_upgrade_phase | default('') == 'control_plane'
-    - k8s_detected_role == 'master'
-    - inventory_hostname == groups['control_plane'][0] | default(groups['all'][0])
-  tags:
-    - crio
-    - runtime
 
 # 09. 추가 마스터 노드 업그레이드
 - name: "09. 추가 컨트롤 플레인 노드 업그레이드"
@@ -89,15 +88,14 @@
     - control-plane
     - other-masters
 
-# 09.5. CRI-O 컨테이너 런타임 업그레이드 (추가 마스터 노드들)
-- name: "09.5. CRI-O 컨테이너 런타임 업그레이드 (추가 마스터 노드들)"
+# 09.5. CRI-O 컨테이너 런타임 업그레이드 (워커 노드)
+- name: "09.5. CRI-O 컨테이너 런타임 업그레이드 (워커 노드)"
   include_tasks: 13_upgrade_crio.yml
   when: 
     - not k8s_skip_upgrade
     - k8s_container_runtime == 'crio'
-    - k8s_upgrade_phase | default('') == 'control_plane'
-    - k8s_detected_role == 'master'
-    - inventory_hostname != groups['control_plane'][0] | default(groups['all'][0])
+    - k8s_upgrade_phase | default('') == 'worker'
+    - k8s_detected_role == 'worker'
   tags:
     - crio
     - runtime
@@ -110,18 +108,6 @@
     - k8s_detected_role == 'worker'
   tags:
     - worker
-
-# 10.5. CRI-O 컨테이너 런타임 업그레이드 (워커 노드)
-- name: "10.5. CRI-O 컨테이너 런타임 업그레이드 (워커 노드)"
-  include_tasks: 13_upgrade_crio.yml
-  when: 
-    - not k8s_skip_upgrade
-    - k8s_container_runtime == 'crio'
-    - k8s_upgrade_phase | default('') == 'worker'
-    - k8s_detected_role == 'worker'
-  tags:
-    - crio
-    - runtime
 
 # 11. 업그레이드 후 검증
 - name: "11. 업그레이드 검증"
