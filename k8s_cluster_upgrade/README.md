@@ -138,6 +138,15 @@ ansible_ssh_private_key_file=~/.ssh/id_rsa
 | `k8s_bin_dir` | `"/usr/local/bin"` | 바이너리 설치 경로 |
 | `k8s_config_dir` | `"/etc/kubernetes"` | 설정 파일 경로 |
 
+### Calico CNI 설정
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `k8s_calico_upgrade_enabled` | `true` | Calico 업그레이드 활성화 |
+| `k8s_calico_force_upgrade` | `false` | 강제 업그레이드 (같은 버전도 수행) |
+| `k8s_calico_backup_enabled` | `true` | Calico 설정 백업 |
+| `k8s_calico_upgrade_timeout` | `300` | Calico 업그레이드 타임아웃 (초) |
+| `k8s_calico_network_test` | `true` | 업그레이드 후 네트워크 테스트 |
+
 ## 태그 사용법
 
 특정 단계만 실행하려면 태그를 사용하세요:
@@ -173,8 +182,9 @@ ansible-playbook -i inventory/hosts playbook.yml --tags worker
 7. **첫 번째 마스터 업그레이드**: 첫 번째 컨트롤 플레인 노드 업그레이드
 8. **추가 마스터 업그레이드**: 나머지 컨트롤 플레인 노드들 순차 업그레이드
 9. **워커 노드 업그레이드**: 모든 워커 노드들 순차 업그레이드
-10. **검증**: 클러스터 상태 및 기능 검증
-11. **정리**: 임시 파일 정리 및 최종 상태 확인
+10. **Calico CNI 업그레이드**: Kubernetes 버전별 권장 Calico 버전으로 업그레이드
+11. **검증**: 클러스터 상태 및 기능 검증
+12. **정리**: 임시 파일 정리 및 최종 상태 확인
 
 ## 트러블슈팅
 

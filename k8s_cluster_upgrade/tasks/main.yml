@@ -123,16 +123,27 @@
     - crio
     - runtime
 
-# 11. 업그레이드 후 검증
-- name: "11. 업그레이드 검증"
+# 11. Calico CNI 업그레이드 (첫 번째 마스터 노드에서만)
+- name: "11. Calico CNI 업그레이드"
+  include_tasks: 14_upgrade_calico.yml
+  when: 
+    - k8s_upgrade_phase | default('') == 'control_plane'
+    - k8s_detected_role == 'master'
+    - inventory_hostname == groups['control_plane'][0] | default(groups['all'][0])
+  tags:
+    - calico
+    - cni
+
+# 12. 업그레이드 후 검증
+- name: "12. 업그레이드 검증"
   include_tasks: 11_verify.yml
   when: k8s_verify_upgrade
   tags:
     - verify
     - always
 
-# 12. 정리 작업
-- name: "12. 정리 작업"
+# 13. 정리 작업
+- name: "13. 정리 작업"
   include_tasks: 12_cleanup.yml
   tags:
     - cleanup
