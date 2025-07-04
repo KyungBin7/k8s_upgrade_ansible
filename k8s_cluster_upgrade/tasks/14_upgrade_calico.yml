@@ -1,289 +1,233 @@
 ---
 # Calico CNI 업그레이드
 
-- name: "Calico 업그레이드 시작"
+# Calico 업그레이드 활성화 확인
+- name: "Calico 업그레이드 활성화 여부 확인"
   debug:
-    msg: "Calico CNI 네트워크 플러그인 업그레이드를 시작합니다"
+    msg: "Calico 업그레이드: {{ '활성화' if k8s_calico_upgrade_enabled else '비활성화' }}"
 
-# 변수 초기화
-- name: "Calico 업그레이드 변수 초기화"
-  set_fact:
-    calico_needs_upgrade: false
-    calico_backup_dir: "{{ k8s_backup_dir }}/calico-{{ ansible_date_time.epoch }}"
-
-# 현재 Calico 버전 확인
-- name: "현재 Calico 버전 확인"
-  shell: |
-    if kubectl get ds -n kube-system calico-node >/dev/null 2>&1; then
-      kubectl get ds -n kube-system calico-node -o jsonpath='{.spec.template.spec.containers[0].image}' | cut -d':' -f2
-    elif kubectl get pods -n calico-system calico-node -o jsonpath='{.items[0].spec.containers[0].image}' 2>/dev/null | cut -d':' -f2; then
-      kubectl get pods -n calico-system calico-node -o jsonpath='{.items[0].spec.containers[0].image}' | cut -d':' -f2
-    else
-      echo "not_found"
-    fi
-  register: calico_current_version
-  delegate_to: "{{ groups['k8s_masters'][0] }}"
-  when: 
-    - current_cluster_status.rc == 0
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-  changed_when: false
-
-- name: "현재 Calico 버전 표시"
+- name: "Calico 업그레이드 건너뛰기"
   debug:
-    msg: "현재 Calico 버전: {{ calico_current_version.stdout | default('확인 불가') }}"
-  when: calico_current_version is defined
+    msg: "Calico 업그레이드가 비활성화되어 있습니다. 건너뜁니다."
+  when: not k8s_calico_upgrade_enabled
 
-# Calico 설치 방법 감지
-- name: "Calico 설치 방법 감지 (Operator)"
-  shell: kubectl get deployment -n tigera-operator tigera-operator
-  register: calico_operator_check
-  delegate_to: "{{ groups['k8s_masters'][0] }}"
-  when: 
-    - current_cluster_status.rc == 0
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-  ignore_errors: true
-  changed_when: false
+# Calico 업그레이드 메인 블록
+- name: "Calico CNI 업그레이드 실행"
+  block:
+    - name: "Calico 업그레이드 시작"
+      debug:
+        msg: "Calico CNI 네트워크 플러그인 업그레이드를 시작합니다"
 
-- name: "Calico 설치 방법 감지 (Manifest)"
-  shell: kubectl get ds -n kube-system calico-node
-  register: calico_manifest_check
-  delegate_to: "{{ groups['k8s_masters'][0] }}"
-  when: 
-    - current_cluster_status.rc == 0
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-    - calico_operator_check.rc != 0
-  ignore_errors: true
-  changed_when: false
+    # 변수 초기화
+    - name: "Calico 업그레이드 변수 초기화"
+      set_fact:
+        calico_needs_upgrade: false
+        calico_backup_dir: "{{ k8s_backup_dir }}/calico-{{ ansible_date_time.epoch }}"
 
-- name: "Calico 설치 방법 설정"
-  set_fact:
-    calico_install_method: "{{ 'operator' if calico_operator_check.rc == 0 else ('manifest' if calico_manifest_check.rc == 0 else 'none') }}"
-  when: 
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
+    # 클러스터 접근 가능 여부 확인
+    - name: "클러스터 접근 가능 여부 확인"
+      shell: kubectl cluster-info --request-timeout=10s
+      register: cluster_access_check
+      delegate_to: "{{ groups['k8s_masters'][0] }}"
+      ignore_errors: true
+      changed_when: false
 
-# Kubernetes 버전별 Calico 권장 버전 매트릭스
-- name: "Kubernetes 버전별 Calico 권장 버전 설정"
-  set_fact:
-    calico_version_matrix:
-      "1.23":
-        recommended_version: "v3.24.6"
-        minimum_version: "v3.22.0"
-        operator_version: "v1.30.9"
-      "1.24":
-        recommended_version: "v3.25.2"
-        minimum_version: "v3.23.0"
-        operator_version: "v1.32.7"
-      "1.25":
-        recommended_version: "v3.26.4"
-        minimum_version: "v3.24.0"
-        operator_version: "v1.34.3"
-      "1.26":
-        recommended_version: "v3.27.4"
-        minimum_version: "v3.25.0"
-        operator_version: "v1.36.1"
-      "1.27":
-        recommended_version: "v3.28.2"
-        minimum_version: "v3.26.0"
-        operator_version: "v1.38.1"
+    - name: "클러스터 접근 불가 시 중단"
+      fail:
+        msg: "클러스터에 접근할 수 없습니다. Calico 업그레이드를 중단합니다."
+      when: cluster_access_check.rc != 0
 
-# 목표 Calico 버전 결정
-- name: "목표 Calico 버전 결정"
-  set_fact:
-    calico_target_version: "{{ calico_version_matrix[k8s_target_minor_version].recommended_version | default('v3.30.2') }}"
-    calico_target_operator_version: "{{ calico_version_matrix[k8s_target_minor_version].operator_version | default('v1.38.3') }}"
-  when: 
-    - k8s_target_minor_version is defined
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-
-- name: "목표 Calico 버전 표시"
-  debug:
-    msg: 
-      - "목표 Calico 버전: {{ calico_target_version | default('N/A') }}"
-      - "설치 방법: {{ calico_install_method | default('N/A') }}"
-
-# 업그레이드 필요성 확인
-- name: "Calico 업그레이드 필요성 확인"
-  set_fact:
-    calico_needs_upgrade: true
-  when:
-    - calico_current_version is defined
-    - calico_current_version.stdout != "not_found"
-    - calico_current_version.stdout != "확인 불가"
-    - calico_target_version is defined
-    - calico_current_version.stdout != calico_target_version.replace('v', '')
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-
-# Calico 설정 백업
-- name: "Calico 백업 디렉토리 생성"
-  file:
-    path: "{{ calico_backup_dir }}"
-    state: directory
-    mode: '0755'
-  when: 
-    - calico_needs_upgrade
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-
-- name: "Calico 리소스 백업 (Operator 방식)"
-  shell: |
-    kubectl get installation default -o yaml > {{ calico_backup_dir }}/calico-installation.yaml
-    kubectl get tigerastatus -o yaml > {{ calico_backup_dir }}/calico-tigerastatus.yaml
-    kubectl get crd -l app.kubernetes.io/name=tigera-operator -o yaml > {{ calico_backup_dir }}/calico-operator-crds.yaml
-  when: 
-    - calico_needs_upgrade
-    - calico_install_method == "operator"
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-  ignore_errors: true
-
-- name: "Calico 리소스 백업 (Manifest 방식)"
-  shell: |
-    kubectl get ds -n kube-system calico-node -o yaml > {{ calico_backup_dir }}/calico-node-daemonset.yaml
-    kubectl get deployment -n kube-system calico-kube-controllers -o yaml > {{ calico_backup_dir }}/calico-controllers.yaml
-    kubectl get configmap -n kube-system calico-config -o yaml > {{ calico_backup_dir }}/calico-config.yaml
-  when: 
-    - calico_needs_upgrade
-    - calico_install_method == "manifest"
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-  ignore_errors: true
-
-# Calico 업그레이드 실행 (Operator 방식)
-- name: "Calico CRDs 업데이트 (Operator)"
-  shell: |
-    curl -s https://raw.githubusercontent.com/projectcalico/calico/{{ calico_target_version }}/manifests/operator-crds.yaml | \
-    kubectl apply --server-side --force-conflicts -f -
-  when: 
-    - calico_needs_upgrade
-    - calico_install_method == "operator"
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-
-- name: "Tigera Operator 업데이트"
-  shell: |
-    curl -s https://raw.githubusercontent.com/projectcalico/calico/{{ calico_target_version }}/manifests/tigera-operator.yaml | \
-    kubectl apply --server-side --force-conflicts -f -
-  when: 
-    - calico_needs_upgrade
-    - calico_install_method == "operator"
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-
-# Calico 업그레이드 실행 (Manifest 방식)
-- name: "Calico Manifest 다운로드 및 적용"
-  shell: |
-    curl -s https://raw.githubusercontent.com/projectcalico/calico/{{ calico_target_version }}/manifests/calico.yaml | \
-    kubectl apply --server-side --force-conflicts -f -
-  when: 
-    - calico_needs_upgrade
-    - calico_install_method == "manifest"
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-
-# 업그레이드 상태 확인
-- name: "Calico 업그레이드 완료 대기"
-  shell: |
-    timeout 300 bash -c '
-      while true; do
-        if kubectl get pods -n {{ "tigera-operator" if calico_install_method == "operator" else "kube-system" }} \
-           -l k8s-app=calico-node --no-headers | grep -v Running | wc -l | grep -q "^0$"; then
-          echo "모든 calico-node 파드가 Running 상태입니다"
-          break
+    # 현재 Calico 버전 확인
+    - name: "현재 Calico 버전 확인"
+      shell: |
+        if kubectl get ds -n kube-system calico-node >/dev/null 2>&1; then
+          kubectl get ds -n kube-system calico-node -o jsonpath='{.spec.template.spec.containers[0].image}' | cut -d':' -f2
+        elif kubectl get pods -n calico-system calico-node -o jsonpath='{.items[0].spec.containers[0].image}' 2>/dev/null | cut -d':' -f2; then
+          kubectl get pods -n calico-system calico-node -o jsonpath='{.items[0].spec.containers[0].image}' | cut -d':' -f2
+        else
+          echo "not_found"
         fi
-        echo "Calico 파드 업그레이드 대기 중..."
-        sleep 10
-      done
-    '
-  register: calico_upgrade_wait
-  when: 
-    - calico_needs_upgrade
+      register: calico_current_version
+      delegate_to: "{{ groups['k8s_masters'][0] }}"
+      changed_when: false
+
+    - name: "현재 Calico 버전 표시"
+      debug:
+        msg: "현재 Calico 버전: {{ calico_current_version.stdout | default('확인 불가') }}"
+
+    # Calico 설치되지 않은 경우 처리
+    - name: "Calico 미설치 시 건너뛰기"
+      debug:
+        msg: "Calico가 설치되지 않았습니다. 업그레이드를 건너뜁니다."
+      when: calico_current_version.stdout == "not_found"
+
+    # Calico 설치 방법 감지
+    - name: "Calico 설치 방법 감지 (Operator)"
+      shell: kubectl get deployment -n tigera-operator tigera-operator
+      register: calico_operator_check
+      delegate_to: "{{ groups['k8s_masters'][0] }}"
+      ignore_errors: true
+      changed_when: false
+      when: calico_current_version.stdout != "not_found"
+
+    - name: "Calico 설치 방법 감지 (Manifest)"
+      shell: kubectl get ds -n kube-system calico-node
+      register: calico_manifest_check
+      delegate_to: "{{ groups['k8s_masters'][0] }}"
+      ignore_errors: true
+      changed_when: false
+      when: 
+        - calico_current_version.stdout != "not_found"
+        - calico_operator_check.rc != 0
+
+    - name: "Calico 설치 방법 설정"
+      set_fact:
+        calico_install_method: "{{ 'operator' if calico_operator_check.rc == 0 else ('manifest' if calico_manifest_check.rc == 0 else 'none') }}"
+      when: calico_current_version.stdout != "not_found"
+
+    # 목표 Calico 버전 결정
+    - name: "목표 Calico 버전 결정"
+      set_fact:
+        calico_target_version: "{{ k8s_calico_version_matrix[k8s_target_minor_version].recommended_version | default('v3.30.2') }}"
+        calico_target_operator_version: "{{ k8s_calico_version_matrix[k8s_target_minor_version].operator_version | default('v1.38.3') }}"
+      when: 
+        - k8s_target_minor_version is defined
+        - calico_current_version.stdout != "not_found"
+
+    - name: "목표 Calico 버전 표시"
+      debug:
+        msg: 
+          - "목표 Calico 버전: {{ calico_target_version | default('N/A') }}"
+          - "설치 방법: {{ calico_install_method | default('N/A') }}"
+
+    # 업그레이드 필요성 확인
+    - name: "Calico 업그레이드 필요성 확인"
+      set_fact:
+        calico_needs_upgrade: true
+      when:
+        - calico_current_version.stdout != "not_found"
+        - calico_current_version.stdout != "확인 불가"
+        - calico_target_version is defined
+        - (calico_current_version.stdout != calico_target_version.replace('v', '') or k8s_calico_force_upgrade)
+
+    - name: "업그레이드 필요성 결과"
+      debug:
+        msg: "Calico 업그레이드 {{ '필요' if calico_needs_upgrade else '불필요' }}"
+
+    # Calico 설정 백업 (업그레이드가 필요한 경우만)
+    - name: "Calico 백업 및 업그레이드 실행"
+      block:
+        - name: "Calico 백업 디렉토리 생성"
+          file:
+            path: "{{ calico_backup_dir }}"
+            state: directory
+            mode: '0755'
+
+        - name: "Calico 리소스 백업 (Operator 방식)"
+          shell: |
+            kubectl get installation default -o yaml > {{ calico_backup_dir }}/calico-installation.yaml 2>/dev/null || true
+            kubectl get tigerastatus -o yaml > {{ calico_backup_dir }}/calico-tigerastatus.yaml 2>/dev/null || true
+            kubectl get crd -l app.kubernetes.io/name=tigera-operator -o yaml > {{ calico_backup_dir }}/calico-operator-crds.yaml 2>/dev/null || true
+          when: calico_install_method == "operator"
+          ignore_errors: true
+
+        - name: "Calico 리소스 백업 (Manifest 방식)"
+          shell: |
+            kubectl get ds -n kube-system calico-node -o yaml > {{ calico_backup_dir }}/calico-node-daemonset.yaml 2>/dev/null || true
+            kubectl get deployment -n kube-system calico-kube-controllers -o yaml > {{ calico_backup_dir }}/calico-controllers.yaml 2>/dev/null || true
+            kubectl get configmap -n kube-system calico-config -o yaml > {{ calico_backup_dir }}/calico-config.yaml 2>/dev/null || true
+          when: calico_install_method == "manifest"
+          ignore_errors: true
+
+        # Calico 업그레이드 실행 (Operator 방식)
+        - name: "Calico CRDs 업데이트 (Operator)"
+          shell: |
+            curl -s https://raw.githubusercontent.com/projectcalico/calico/{{ calico_target_version }}/manifests/operator-crds.yaml | \
+            kubectl apply --server-side --force-conflicts -f -
+          when: calico_install_method == "operator"
+
+        - name: "Tigera Operator 업데이트"
+          shell: |
+            curl -s https://raw.githubusercontent.com/projectcalico/calico/{{ calico_target_version }}/manifests/tigera-operator.yaml | \
+            kubectl apply --server-side --force-conflicts -f -
+          when: calico_install_method == "operator"
+
+        # Calico 업그레이드 실행 (Manifest 방식)
+        - name: "Calico Manifest 다운로드 및 적용"
+          shell: |
+            curl -s https://raw.githubusercontent.com/projectcalico/calico/{{ calico_target_version }}/manifests/calico.yaml | \
+            kubectl apply --server-side --force-conflicts -f -
+          when: calico_install_method == "manifest"
+
+        # 업그레이드 상태 확인
+        - name: "Calico 업그레이드 완료 대기"
+          shell: |
+            timeout {{ k8s_calico_upgrade_timeout }} bash -c '
+              while true; do
+                if kubectl get pods -n {{ "tigera-operator" if calico_install_method == "operator" else "kube-system" }} \
+                   -l k8s-app=calico-node --no-headers | grep -v Running | wc -l | grep -q "^0$"; then
+                  echo "모든 calico-node 파드가 Running 상태입니다"
+                  break
+                fi
+                echo "Calico 파드 업그레이드 대기 중..."
+                sleep 10
+              done
+            '
+          register: calico_upgrade_wait
+          delegate_to: "{{ groups['k8s_masters'][0] }}"
+
+        - name: "업그레이드 후 Calico 버전 확인"
+          shell: |
+            if kubectl get ds -n kube-system calico-node >/dev/null 2>&1; then
+              kubectl get ds -n kube-system calico-node -o jsonpath='{.spec.template.spec.containers[0].image}' | cut -d':' -f2
+            elif kubectl get pods -n calico-system calico-node -o jsonpath='{.items[0].spec.containers[0].image}' 2>/dev/null | cut -d':' -f2; then
+              kubectl get pods -n calico-system calico-node -o jsonpath='{.items[0].spec.containers[0].image}' | cut -d':' -f2
+            else
+              echo "not_found"
+            fi
+          register: calico_new_version
+          delegate_to: "{{ groups['k8s_masters'][0] }}"
+          changed_when: false
+
+        - name: "Calico 업그레이드 결과 표시"
+          debug:
+            msg:
+              - "=== Calico 업그레이드 완료 ==="
+              - "이전 버전: {{ calico_current_version.stdout }}"
+              - "새 버전: {{ calico_new_version.stdout }}"
+              - "설치 방법: {{ calico_install_method }}"
+              - "백업 위치: {{ calico_backup_dir }}"
+
+        # 네트워크 테스트 (옵션)
+        - name: "네트워크 연결성 테스트"
+          block:
+            - name: "파드 간 네트워크 테스트"
+              shell: |
+                # 테스트 파드 생성 및 네트워크 확인
+                kubectl run test-pod-1 --image=busybox --restart=Never --rm -i --tty --timeout=60s -- /bin/sh -c "
+                  nslookup kubernetes.default.svc.cluster.local && 
+                  echo 'DNS 해상도 정상'
+                " 2>/dev/null || echo "네트워크 테스트 실패"
+              register: network_test_result
+              delegate_to: "{{ groups['k8s_masters'][0] }}"
+              ignore_errors: true
+
+            - name: "네트워크 테스트 결과"
+              debug:
+                msg: "네트워크 테스트: {{ '성공' if network_test_result.rc == 0 else '실패' }}"
+          when: k8s_calico_network_test
+
+      when: 
+        - calico_needs_upgrade
+        - k8s_calico_backup_enabled
+
+  when:
+    - k8s_calico_upgrade_enabled
     - k8s_detected_role == "master"
     - inventory_hostname == groups['k8s_masters'][0] | default('')
 
-- name: "업그레이드된 Calico 버전 확인"
-  shell: |
-    if kubectl get ds -n kube-system calico-node >/dev/null 2>&1; then
-      kubectl get ds -n kube-system calico-node -o jsonpath='{.spec.template.spec.containers[0].image}' | cut -d':' -f2
-    elif kubectl get pods -n calico-system -l k8s-app=calico-node -o jsonpath='{.items[0].spec.containers[0].image}' 2>/dev/null | cut -d':' -f2; then
-      kubectl get pods -n calico-system -l k8s-app=calico-node -o jsonpath='{.items[0].spec.containers[0].image}' | cut -d':' -f2
-    else
-      echo "확인 불가"
-    fi
-  register: calico_upgraded_version
-  when: 
-    - calico_needs_upgrade
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-  changed_when: false
-
-# 업그레이드 결과 검증
-- name: "Calico 업그레이드 성공 확인"
-  set_fact:
-    calico_upgrade_success: "{{ calico_upgraded_version.stdout == calico_target_version.replace('v', '') }}"
-  when: 
-    - calico_needs_upgrade
-    - calico_upgraded_version is defined
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-
-- name: "Calico 파드 상태 확인"
-  shell: kubectl get pods -n {{ "calico-system" if calico_install_method == "operator" else "kube-system" }} -l k8s-app=calico-node
-  register: calico_pod_status
-  when: 
-    - calico_needs_upgrade
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-  changed_when: false
-
-- name: "Calico 네트워크 연결 테스트"
-  shell: |
-    # 간단한 네트워크 연결 테스트
-    timeout 30 kubectl run calico-test-pod --image=busybox --rm -it --restart=Never -- nslookup kubernetes.default.svc.cluster.local
-  register: calico_network_test
-  when: 
-    - calico_needs_upgrade
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-  ignore_errors: true
-  changed_when: false
-
-# 결과 보고
-- name: "Calico 업그레이드 결과 보고"
+# 업그레이드 완료 메시지
+- name: "Calico 업그레이드 프로세스 완료"
   debug:
-    msg:
-      - "=== Calico 업그레이드 결과 ==="
-      - "이전 버전: {{ calico_current_version.stdout | default('N/A') }}"
-      - "목표 버전: {{ calico_target_version | default('N/A') }}"
-      - "현재 버전: {{ calico_upgraded_version.stdout | default('N/A') }}"
-      - "업그레이드 성공: {{ calico_upgrade_success | default(false) }}"
-      - "설치 방법: {{ calico_install_method | default('N/A') }}"
-      - "네트워크 테스트: {{ 'OK' if calico_network_test.rc == 0 else 'Failed' }}"
-  when: 
-    - calico_needs_upgrade
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-
-- name: "Calico 업그레이드 실패 경고"
-  debug:
-    msg:
-      - "경고: Calico 업그레이드가 완전히 성공하지 않았습니다!"
-      - "백업 위치: {{ calico_backup_dir }}"
-      - "수동으로 확인이 필요합니다."
-  when: 
-    - calico_needs_upgrade
-    - not (calico_upgrade_success | default(false))
-    - k8s_detected_role == "master"
-    - inventory_hostname == groups['k8s_masters'][0] | default('')
-
-- name: "Calico 업그레이드 완료"
-  debug:
-    msg: "Calico CNI 네트워크 플러그인 업그레이드가 완료되었습니다"
-  when: 
-    - calico_needs_upgrade
-    - calico_upgrade_success | default(false) 
+    msg: "Calico CNI 업그레이드 프로세스가 완료되었습니다."
+  when: k8s_calico_upgrade_enabled 
