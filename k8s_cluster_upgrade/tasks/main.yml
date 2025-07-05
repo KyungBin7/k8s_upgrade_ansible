@@ -128,7 +128,7 @@
   include_tasks: debug_calico.yml
   when: 
     - k8s_calico_upgrade_enabled | default(true)
-    - k8s_detected_role == 'master'
+    - k8s_detected_role | default('') == 'master'
   tags:
     - calico-debug
     - debug
@@ -138,7 +138,7 @@
   include_tasks: 14_upgrade_calico.yml
   when: 
     - k8s_calico_upgrade_enabled | default(true)
-    - k8s_detected_role == 'master'
+    - k8s_detected_role | default('') == 'master'
     - inventory_hostname == groups['k8s_masters'][0] | default(groups['control_plane'][0]) | default(groups['all'][0])
   tags:
     - calico

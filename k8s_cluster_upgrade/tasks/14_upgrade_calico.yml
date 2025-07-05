@@ -223,7 +223,7 @@
 
   when:
     - k8s_calico_upgrade_enabled
-    - k8s_detected_role == "master"
+    - k8s_detected_role | default('') == "master"
     - inventory_hostname == groups['k8s_masters'][0] | default('')
 
 # 업그레이드 완료 메시지

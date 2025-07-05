@@ -38,18 +38,18 @@
   debug:
     msg:
       - "k8s_upgrade_phase == 'control_plane': {{ (k8s_upgrade_phase | default('')) == 'control_plane' }}"
-      - "k8s_detected_role == 'master': {{ k8s_detected_role == 'master' }}"
+      - "k8s_detected_role == 'master': {{ (k8s_detected_role | default('')) == 'master' }}"
       - "inventory_hostname == groups['control_plane'][0]: {{ inventory_hostname == groups['control_plane'][0] | default('') }}"
-      - "전체 조건 (기존): {{ ((k8s_upgrade_phase | default('')) == 'control_plane') and (k8s_detected_role == 'master') and (inventory_hostname == groups['control_plane'][0] | default('')) }}"
+      - "전체 조건 (기존): {{ ((k8s_upgrade_phase | default('')) == 'control_plane') and ((k8s_detected_role | default('')) == 'master') and (inventory_hostname == groups['control_plane'][0] | default('')) }}"
 
 # 14_upgrade_calico.yml 조건 확인
 - name: "14_upgrade_calico.yml 조건들 확인"
   debug:
     msg:
       - "k8s_calico_upgrade_enabled: {{ k8s_calico_upgrade_enabled | default(false) }}"
-      - "k8s_detected_role == 'master': {{ k8s_detected_role == 'master' }}"
+      - "k8s_detected_role == 'master': {{ (k8s_detected_role | default('')) == 'master' }}"
       - "inventory_hostname == groups['k8s_masters'][0]: {{ inventory_hostname == groups['k8s_masters'][0] | default('') }}"
-      - "전체 조건 (Calico): {{ k8s_calico_upgrade_enabled | default(false) and (k8s_detected_role == 'master') and (inventory_hostname == groups['k8s_masters'][0] | default('')) }}"
+      - "전체 조건 (Calico): {{ k8s_calico_upgrade_enabled | default(false) and ((k8s_detected_role | default('')) == 'master') and (inventory_hostname == groups['k8s_masters'][0] | default('')) }}"
 
 # 클러스터 접근 확인
 - name: "클러스터 접근 테스트"
