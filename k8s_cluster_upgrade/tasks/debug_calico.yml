@@ -1,0 +1,92 @@
+---
+# Calico 업그레이드 디버깅 태스크
+
+- name: "=== Calico 업그레이드 디버깅 시작 ==="
+  debug:
+    msg: "Calico 업그레이드 실행 조건들을 확인합니다"
+
+# 모든 관련 변수들 확인
+- name: "주요 변수들 확인"
+  debug:
+    msg:
+      - "k8s_calico_upgrade_enabled: {{ k8s_calico_upgrade_enabled | default('undefined') }}"
+      - "k8s_detected_role: {{ k8s_detected_role | default('undefined') }}"
+      - "inventory_hostname: {{ inventory_hostname | default('undefined') }}"
+      - "k8s_upgrade_phase: {{ k8s_upgrade_phase | default('undefined') }}"
+      - "k8s_target_minor_version: {{ k8s_target_minor_version | default('undefined') }}"
+
+# 그룹 정보 확인
+- name: "인벤토리 그룹 정보 확인"
+  debug:
+    msg:
+      - "groups['k8s_masters']: {{ groups['k8s_masters'] | default('undefined') }}"
+      - "groups['control_plane']: {{ groups['control_plane'] | default('undefined') }}"
+      - "groups['all']: {{ groups['all'][0:3] | default('undefined') }}"
+      - "첫 번째 마스터 (k8s_masters): {{ groups['k8s_masters'][0] | default('undefined') }}"
+      - "첫 번째 마스터 (control_plane): {{ groups['control_plane'][0] | default('undefined') }}"
+
+# 현재 노드가 첫 번째 마스터인지 확인
+- name: "현재 노드 확인"
+  debug:
+    msg:
+      - "현재 노드: {{ inventory_hostname }}"
+      - "첫 번째 마스터와 일치 여부 (k8s_masters): {{ inventory_hostname == groups['k8s_masters'][0] | default('') }}"
+      - "첫 번째 마스터와 일치 여부 (control_plane): {{ inventory_hostname == groups['control_plane'][0] | default('') }}"
+
+# main.yml 조건 확인
+- name: "main.yml 조건들 확인"
+  debug:
+    msg:
+      - "k8s_upgrade_phase == 'control_plane': {{ (k8s_upgrade_phase | default('')) == 'control_plane' }}"
+      - "k8s_detected_role == 'master': {{ k8s_detected_role == 'master' }}"
+      - "inventory_hostname == groups['control_plane'][0]: {{ inventory_hostname == groups['control_plane'][0] | default('') }}"
+      - "전체 조건 (기존): {{ ((k8s_upgrade_phase | default('')) == 'control_plane') and (k8s_detected_role == 'master') and (inventory_hostname == groups['control_plane'][0] | default('')) }}"
+
+# 14_upgrade_calico.yml 조건 확인
+- name: "14_upgrade_calico.yml 조건들 확인"
+  debug:
+    msg:
+      - "k8s_calico_upgrade_enabled: {{ k8s_calico_upgrade_enabled | default(false) }}"
+      - "k8s_detected_role == 'master': {{ k8s_detected_role == 'master' }}"
+      - "inventory_hostname == groups['k8s_masters'][0]: {{ inventory_hostname == groups['k8s_masters'][0] | default('') }}"
+      - "전체 조건 (Calico): {{ k8s_calico_upgrade_enabled | default(false) and (k8s_detected_role == 'master') and (inventory_hostname == groups['k8s_masters'][0] | default('')) }}"
+
+# 클러스터 접근 확인
+- name: "클러스터 접근 테스트"
+  shell: kubectl cluster-info --request-timeout=5s
+  register: cluster_debug_check
+  ignore_errors: true
+  changed_when: false
+
+- name: "클러스터 접근 결과"
+  debug:
+    msg:
+      - "클러스터 접근: {{ '성공' if cluster_debug_check.rc == 0 else '실패' }}"
+      - "오류 메시지: {{ cluster_debug_check.stderr | default('없음') }}"
+
+# 현재 Calico 상태 확인
+- name: "현재 Calico 상태 확인"
+  shell: |
+    echo "=== DaemonSet 확인 ==="
+    kubectl get ds -n kube-system calico-node -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "calico-node DaemonSet 없음"
+    echo -e "\n=== Deployment 확인 ==="
+    kubectl get deployment -n kube-system calico-kube-controllers -o jsonpath='{.spec.template.spec.containers[0].image}' 2>/dev/null || echo "calico-kube-controllers Deployment 없음"
+    echo -e "\n=== Operator 확인 ==="
+    kubectl get deployment -n tigera-operator tigera-operator 2>/dev/null && echo "Operator 방식" || echo "Manifest 방식"
+  register: calico_status_debug
+  ignore_errors: true
+  changed_when: false
+
+- name: "Calico 상태 결과"
+  debug:
+    msg: "{{ calico_status_debug.stdout_lines | default(['확인 불가']) }}"
+
+# 결론 
+- name: "=== 디버깅 결론 ==="
+  debug:
+    msg:
+      - "Calico 업그레이드 실행 여부를 확인하세요:"
+      - "1. main.yml 조건이 모두 true인가?"
+      - "2. 14_upgrade_calico.yml 조건이 모두 true인가?"
+      - "3. 클러스터 접근이 가능한가?"
+      - "4. 인벤토리 그룹명이 일치하는가?" 

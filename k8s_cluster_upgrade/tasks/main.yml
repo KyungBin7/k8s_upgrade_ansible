@@ -123,13 +123,23 @@
     - crio
     - runtime
 
+# 11. Calico CNI 업그레이드 디버깅 (문제 해결용)
+- name: "11-1. Calico 업그레이드 디버깅"
+  include_tasks: debug_calico.yml
+  when: 
+    - k8s_calico_upgrade_enabled | default(true)
+    - k8s_detected_role == 'master'
+  tags:
+    - calico-debug
+    - debug
+
 # 11. Calico CNI 업그레이드 (첫 번째 마스터 노드에서만)
 - name: "11. Calico CNI 업그레이드"
   include_tasks: 14_upgrade_calico.yml
   when: 
-    - k8s_upgrade_phase | default('') == 'control_plane'
+    - k8s_calico_upgrade_enabled | default(true)
     - k8s_detected_role == 'master'
-    - inventory_hostname == groups['control_plane'][0] | default(groups['all'][0])
+    - inventory_hostname == groups['k8s_masters'][0] | default(groups['control_plane'][0]) | default(groups['all'][0])
   tags:
     - calico
     - cni
