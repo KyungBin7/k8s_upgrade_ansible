@@ -133,17 +133,6 @@
     - calico-debug
     - debug
 
-# 11. Calico CNI 업그레이드 (첫 번째 마스터 노드에서만)
-- name: "11. Calico CNI 업그레이드"
-  include_tasks: 14_upgrade_calico.yml
-  when: 
-    - k8s_calico_upgrade_enabled | default(true)
-    - k8s_detected_role | default('') == 'master'
-    - inventory_hostname == groups['k8s_masters'][0] | default(groups['control_plane'][0]) | default(groups['all'][0])
-  tags:
-    - calico
-    - cni
-
 # 12. 업그레이드 후 검증
 - name: "12. 업그레이드 검증"
   include_tasks: 11_verify.yml
