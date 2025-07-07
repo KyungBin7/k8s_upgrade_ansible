@@ -76,6 +76,20 @@ k8s_version_matrix:
     crio_version: "1.28"
     crio_minor_version: "1.28"
     opensuse_available: true
+  "1.29":
+    next_version: "1.30"
+    supported_os:
+      - rocky-8
+      - rocky-9
+      - centos-8
+      - centos-9
+      - ubuntu-20.04
+      - ubuntu-22.04
+      - ubuntu-24.04
+    etcd_version: "3.5.12"
+    crio_version: "1.29"
+    crio_minor_version: "1.29"
+    opensuse_available: true
 
 # 바이너리 다운로드 URL 템플릿
 k8s_binary_base_url: "https://dl.k8s.io/release"

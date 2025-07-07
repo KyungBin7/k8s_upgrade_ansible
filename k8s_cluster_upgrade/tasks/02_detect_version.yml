@@ -85,14 +85,23 @@
     - ansible_os_family == "Debian"
     - k8s_package_manager in ['auto', 'apt']
 
-# 현재 버전 결정 로직
-- name: "현재 버전 결정 (kubectl 우선)"
+# 현재 버전 결정 로직 (우선순위: 클러스터 > kubeadm > kubelet > kubectl)
+- name: "현재 버전 결정 (클러스터 버전 우선)"
   set_fact:
-    k8s_current_version: "{{ k8s_kubectl_version }}"
+    k8s_current_version: "{{ k8s_cluster_version }}"
   when: 
     - k8s_current_version == ""
-    - k8s_kubectl_version is defined
-    - k8s_kubectl_version != ""
+    - k8s_cluster_version is defined
+    - k8s_cluster_version != ""
+    - k8s_cluster_version != "failed"
+
+- name: "현재 버전 결정 (kubeadm 대체)"
+  set_fact:
+    k8s_current_version: "{{ k8s_kubeadm_version }}"
+  when: 
+    - k8s_current_version == ""
+    - k8s_kubeadm_version is defined
+    - k8s_kubeadm_version != ""
 
 - name: "현재 버전 결정 (kubelet 대체)"
   set_fact:
@@ -102,13 +111,13 @@
     - k8s_kubelet_version is defined
     - k8s_kubelet_version != ""
 
-- name: "현재 버전 결정 (kubeadm 대체)"
+- name: "현재 버전 결정 (kubectl 최후)"
   set_fact:
-    k8s_current_version: "{{ k8s_kubeadm_version }}"
+    k8s_current_version: "{{ k8s_kubectl_version }}"
   when: 
     - k8s_current_version == ""
-    - k8s_kubeadm_version is defined
-    - k8s_kubeadm_version != ""
+    - k8s_kubectl_version is defined
+    - k8s_kubectl_version != ""
 
 # 클러스터 버전 확인 (마스터 노드인 경우)
 - name: "클러스터 버전 확인 (--short 방식 시도)"
@@ -138,6 +147,14 @@
     - cluster_version_short_output.stdout == "failed"
     - cluster_version_new_output.stdout != "failed"
     - cluster_version_new_output.stdout != ""
+
+- name: "클러스터 버전 감지 디버깅"
+  debug:
+    msg:
+      - "클러스터 버전 감지 결과:"
+      - "  --short 방식 결과: {{ cluster_version_short_output.stdout | default('N/A') }}"
+      - "  새로운 방식 결과: {{ cluster_version_new_output.stdout | default('N/A') }}"
+      - "  최종 클러스터 버전: {{ k8s_cluster_version | default('N/A') }}"
 
 - name: "현재 버전 정보 표시"
   debug:
