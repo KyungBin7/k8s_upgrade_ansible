@@ -144,9 +144,13 @@
 - name: "현재 Kubernetes 버전 확인"
   shell: |
     if [ -f "{{ k8s_bin_dir }}/kubectl" ]; then
-      {{ k8s_bin_dir }}/kubectl version --client --short 2>/dev/null | grep 'Client Version' | awk '{print $3}' | sed 's/v//'
+      # 먼저 --short 플래그를 시도하고 실패하면 새로운 방식 사용
+      {{ k8s_bin_dir }}/kubectl version --client --short 2>/dev/null | grep -E 'Client Version' | awk '{print $3}' | sed 's/v//' || \
+      {{ k8s_bin_dir }}/kubectl version --client 2>/dev/null | grep -E 'clientVersion|gitVersion' | head -1 | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1 | sed 's/v//'
     elif command -v kubectl >/dev/null 2>&1; then
-      kubectl version --client --short 2>/dev/null | grep 'Client Version' | awk '{print $3}' | sed 's/v//'
+      # 먼저 --short 플래그를 시도하고 실패하면 새로운 방식 사용
+      kubectl version --client --short 2>/dev/null | grep -E 'Client Version' | awk '{print $3}' | sed 's/v//' || \
+      kubectl version --client 2>/dev/null | grep -E 'clientVersion|gitVersion' | head -1 | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1 | sed 's/v//'
     else
       echo "unknown"
     fi

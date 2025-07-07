@@ -154,7 +154,9 @@
         {{ k8s_bin_dir }}/{{ item }} version --output short
         ;;
       "kubectl")
-        {{ k8s_bin_dir }}/{{ item }} version --client --short
+        # 먼저 --short 플래그를 시도하고 실패하면 새로운 방식 사용
+        {{ k8s_bin_dir }}/{{ item }} version --client --short 2>/dev/null | grep -E 'Client Version' | awk '{print $3}' || \
+        {{ k8s_bin_dir }}/{{ item }} version --client 2>/dev/null | grep -E 'clientVersion|gitVersion' | head -1 | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1
         ;;
       "kubelet")
         {{ k8s_bin_dir }}/{{ item }} --version

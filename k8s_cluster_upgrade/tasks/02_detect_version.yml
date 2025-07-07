@@ -1,11 +1,18 @@
 ---
 # 현재 Kubernetes 버전 감지
 
-- name: "kubectl을 통한 현재 버전 확인"
-  command: kubectl version --client --short
-  register: kubectl_version_output
+- name: "kubectl을 통한 현재 버전 확인 (--short 방식 시도)"
+  shell: kubectl version --client --short 2>/dev/null | grep -E 'Client Version' | awk '{print $3}' || echo "failed"
+  register: kubectl_version_short_output
   failed_when: false
   changed_when: false
+
+- name: "kubectl을 통한 현재 버전 확인 (새로운 방식)"
+  shell: kubectl version --client 2>/dev/null | grep -E 'clientVersion|gitVersion' | head -1 | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1 || echo "failed"
+  register: kubectl_version_new_output
+  failed_when: false
+  changed_when: false
+  when: kubectl_version_short_output.stdout == "failed"
 
 - name: "kubelet을 통한 현재 버전 확인"
   command: kubelet --version
@@ -23,8 +30,18 @@
 # kubectl 버전 파싱
 - name: "kubectl 버전 파싱"
   set_fact:
-    k8s_kubectl_version: "{{ kubectl_version_output.stdout | regex_search('v[0-9]+\\.[0-9]+\\.[0-9]+') }}"
-  when: kubectl_version_output.rc == 0
+    k8s_kubectl_version: "{{ kubectl_version_short_output.stdout }}"
+  when: 
+    - kubectl_version_short_output.stdout != "failed"
+    - kubectl_version_short_output.stdout != ""
+
+- name: "kubectl 버전 파싱 (새로운 방식)"
+  set_fact:
+    k8s_kubectl_version: "{{ kubectl_version_new_output.stdout }}"
+  when: 
+    - kubectl_version_short_output.stdout == "failed"
+    - kubectl_version_new_output.stdout != "failed"
+    - kubectl_version_new_output.stdout != ""
 
 # kubelet 버전 파싱
 - name: "kubelet 버전 파싱"
@@ -94,18 +111,33 @@
     - k8s_kubeadm_version != ""
 
 # 클러스터 버전 확인 (마스터 노드인 경우)
-- name: "클러스터 버전 확인"
-  command: kubectl version --short
-  register: cluster_version_output
+- name: "클러스터 버전 확인 (--short 방식 시도)"
+  shell: kubectl version --short 2>/dev/null | grep -E 'Server Version' | awk '{print $3}' || echo "failed"
+  register: cluster_version_short_output
   failed_when: false
   changed_when: false
 
+- name: "클러스터 버전 확인 (새로운 방식)"
+  shell: kubectl version 2>/dev/null | grep -E 'serverVersion|gitVersion' | tail -1 | grep -o 'v[0-9]\+\.[0-9]\+\.[0-9]\+' | head -1 || echo "failed"
+  register: cluster_version_new_output
+  failed_when: false
+  changed_when: false
+  when: cluster_version_short_output.stdout == "failed"
+
 - name: "클러스터 서버 버전 파싱"
   set_fact:
-    k8s_cluster_version: "{{ cluster_version_output.stdout_lines | select('match', '.*Server Version.*') | first | regex_search('v[0-9]+\\.[0-9]+\\.[0-9]+') }}"
+    k8s_cluster_version: "{{ cluster_version_short_output.stdout }}"
   when: 
-    - cluster_version_output.rc == 0
-    - cluster_version_output.stdout_lines is defined
+    - cluster_version_short_output.stdout != "failed"
+    - cluster_version_short_output.stdout != ""
+
+- name: "클러스터 서버 버전 파싱 (새로운 방식)"
+  set_fact:
+    k8s_cluster_version: "{{ cluster_version_new_output.stdout }}"
+  when: 
+    - cluster_version_short_output.stdout == "failed"
+    - cluster_version_new_output.stdout != "failed"
+    - cluster_version_new_output.stdout != ""
 
 - name: "현재 버전 정보 표시"
   debug:
