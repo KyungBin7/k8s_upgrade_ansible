@@ -121,14 +121,39 @@
 - name: "공식 저장소에서 CRI-O 버전 확인 (Rocky/RHEL)"
   shell: |
     if command -v yum >/dev/null 2>&1; then
-      # yum 업데이트 캐시 갱신
+      echo "=== YUM CRI-O 버전 확인 시작 ==="
+      echo "목표 버전: {{ crio_target_version }}"
+      
+      # yum 저장소 캐시 갱신
       yum makecache fast --quiet 2>/dev/null || true
-      # 먼저 정확한 버전으로 확인
-      yum list available "cri-o-{{ crio_target_version }}*" --showduplicates 2>/dev/null | grep -E "(cri-o-{{ crio_target_version }}|{{ crio_target_version }})" && echo "found" || \
-      # 실패 시 일반적인 패턴으로 확인  
-      yum list available cri-o --showduplicates 2>/dev/null | grep "{{ crio_target_version }}" && echo "found" || echo "not_available"
+      
+      # 다양한 패턴으로 CRI-O 패키지 검색
+      echo "--- 패키지 검색 결과 ---"
+      
+      # 1. 정확한 버전 패키지명으로 검색
+      result1=$(yum list available "cri-o-{{ crio_target_version }}*" --showduplicates 2>/dev/null || echo "search1_failed")
+      echo "검색1 (cri-o-{{ crio_target_version }}*): $result1"
+      
+      # 2. 일반 cri-o 패키지에서 버전 검색
+      result2=$(yum list available cri-o --showduplicates 2>/dev/null || echo "search2_failed")
+      echo "검색2 (cri-o --showduplicates): $result2"
+      
+      # 3. 간단한 버전 검색
+      result3=$(yum search cri-o 2>/dev/null | grep -i cri-o || echo "search3_failed")
+      echo "검색3 (yum search): $result3"
+      
+      # 결과 분석
+      if echo "$result1" | grep -q "{{ crio_target_version }}"; then
+        echo "FOUND_IN_SEARCH1"
+      elif echo "$result2" | grep -q "{{ crio_target_version }}"; then
+        echo "FOUND_IN_SEARCH2"
+      elif echo "$result2" | grep -q "cri-o"; then
+        echo "CRI-O_AVAILABLE_BUT_NOT_TARGET_VERSION"
+      else
+        echo "NOT_AVAILABLE"
+      fi
     else
-      echo "not_yum"
+      echo "NOT_YUM_SYSTEM"
     fi
   register: crio_repo_check
   when: 
@@ -139,14 +164,41 @@
 - name: "공식 저장소에서 CRI-O 버전 확인 (Ubuntu/Debian)"
   shell: |
     if command -v apt >/dev/null 2>&1; then
+      echo "=== APT CRI-O 버전 확인 시작 ==="
+      echo "목표 버전: {{ crio_target_version }}"
+      
       # apt 캐시 갱신
       apt-get update -qq 2>/dev/null || true
-      # 먼저 정확한 버전으로 확인
-      apt-cache madison cri-o 2>/dev/null | grep -E "({{ crio_target_version }}|:{{ crio_target_version }})" && echo "found" || \
-      # 실패 시 일반적인 패턴으로 확인
-      apt-cache policy cri-o 2>/dev/null | grep "{{ crio_target_version }}" && echo "found" || echo "not_available"
+      
+      # 다양한 패턴으로 CRI-O 패키지 검색
+      echo "--- 패키지 검색 결과 ---"
+      
+      # 1. madison으로 버전 검색
+      result1=$(apt-cache madison cri-o 2>/dev/null || echo "madison_failed")
+      echo "검색1 (madison): $result1"
+      
+      # 2. policy로 버전 검색
+      result2=$(apt-cache policy cri-o 2>/dev/null || echo "policy_failed")
+      echo "검색2 (policy): $result2"
+      
+      # 3. show로 패키지 정보 확인
+      result3=$(apt-cache show cri-o 2>/dev/null | grep Version || echo "show_failed")
+      echo "검색3 (show): $result3"
+      
+      # 결과 분석
+      if echo "$result1" | grep -q "{{ crio_target_version }}"; then
+        echo "FOUND_IN_MADISON"
+      elif echo "$result2" | grep -q "{{ crio_target_version }}"; then
+        echo "FOUND_IN_POLICY"
+      elif echo "$result3" | grep -q "{{ crio_target_version }}"; then
+        echo "FOUND_IN_SHOW"
+      elif echo "$result1$result2$result3" | grep -q "cri-o"; then
+        echo "CRI-O_AVAILABLE_BUT_NOT_TARGET_VERSION"
+      else
+        echo "NOT_AVAILABLE"
+      fi
     else
-      echo "not_apt"
+      echo "NOT_APT_SYSTEM"
     fi
   register: crio_repo_check
   when: 
@@ -163,7 +215,7 @@
     - crio_repo_check is defined
     - crio_repo_check.stdout is defined
     - crio_repo_check.rc == 0
-    - "'found' in crio_repo_check.stdout or (crio_repo_check.stdout != 'not_available' and 'not_available' not in crio_repo_check.stdout)"
+    - "(crio_repo_check.stdout | regex_search('FOUND_IN_SEARCH[12]|FOUND_IN_MADISON|FOUND_IN_POLICY|FOUND_IN_SHOW')) is not none"
 
 - name: "CRI-O 저장소 확인 디버깅"
   debug:
@@ -179,15 +231,16 @@
 - name: "CRI-O 저장소 상태 디버그"
   debug:
     msg:
-      - "CRI-O 업그레이드 필요: {{ crio_needs_upgrade }}"
+      - "=== CRI-O 업그레이드 상태 요약 ==="
+      - "업그레이드 필요: {{ crio_needs_upgrade }}"
       - "현재 CRI-O 버전: {{ crio_current_version.stdout | default('unknown') }}"
       - "목표 CRI-O 버전: {{ crio_target_version | default('N/A') }}"
-      - "CRI-O 마이너 버전: {{ crio_minor_version | default('N/A') }}"
-      - "OpenSUSE 저장소 지원: {{ crio_opensuse_available | default(false) }}"
       - "패키지 관리자: {{ k8s_detected_package_manager | default('unknown') }}"
+      - "--- 저장소 상태 ---"
       - "공식 저장소 사용 가능: {{ crio_available_in_repo | default(false) }}"
       - "OpenSUSE URL: {{ opensuse_crio_repo_url | default('N/A') }}"
-      - "Fallback 패키지: {{ crio_fallback_package | default('N/A') }}"
+      - "--- 다음 단계 ---"
+      - "{% if crio_available_in_repo | default(false) %}공식 저장소에서 설치 진행{% else %}OpenSUSE 저장소 확인 진행{% endif %}"
   when: crio_needs_upgrade
 
 # CRI-O 서비스 중지
@@ -208,7 +261,9 @@
 # 방법 1: 공식 저장소에서 CRI-O 업그레이드
 - name: "공식 저장소에서 CRI-O 업그레이드 (Rocky/RHEL)"
   yum:
-    name: "cri-o-{{ crio_target_version }}*"
+    name: 
+      - "cri-o-{{ crio_target_version }}"
+      - "cri-o-{{ crio_target_version }}*"
     state: present
     update_cache: yes
   register: crio_official_yum_install
@@ -219,9 +274,10 @@
 
 - name: "공식 저장소에서 CRI-O 업그레이드 (Ubuntu/Debian)"
   apt:
-    name: "cri-o={{ crio_target_version }}*"
+    name: "cri-o={{ crio_target_version }}-*"
     state: present
     update_cache: yes
+    allow_downgrade: yes
   register: crio_official_apt_install
   when: 
     - crio_needs_upgrade
@@ -286,14 +342,30 @@
   fail:
     msg: 
       - "OpenSUSE 저장소에 접근할 수 없습니다."
-      - "URL: {{ opensuse_crio_repo_url }}"
+      - "URL: {{ opensuse_crio_repo_url | default('정의되지 않음') }}"
       - "상태 코드: {{ opensuse_repo_check.status | default('N/A') }}"
       - "네트워크 연결을 확인하거나 수동으로 CRI-O를 설치해주세요."
   when: 
     - crio_needs_upgrade
     - not (crio_available_in_repo | default(false))
     - opensuse_repo_check is defined
+    - opensuse_repo_check.status is defined
     - opensuse_repo_check.status != 200
+
+- name: "저장소 설정 문제로 인한 중단"
+  fail:
+    msg:
+      - "CRI-O {{ crio_target_version }}를 설치할 수 있는 저장소를 찾을 수 없습니다!"
+      - "공식 저장소: 사용 불가"
+      - "OpenSUSE 저장소: {{ 'URL 없음' if opensuse_crio_repo_url is not defined else ('접근 실패' if opensuse_repo_check is not defined else '확인 중') }}"
+      - "다음을 확인해주세요:"
+      - "  1. CRI-O 저장소가 올바르게 설정되었는지"
+      - "  2. 네트워크 연결 상태"
+      - "  3. {{ crio_target_version }} 버전이 실제로 존재하는지"
+  when:
+    - crio_needs_upgrade  
+    - not (crio_available_in_repo | default(false))
+    - (opensuse_crio_repo_url is not defined or opensuse_crio_repo_url == "" or opensuse_repo_check is not defined)
 
 - name: "CRI-O 바이너리 다운로드 디렉토리 생성"
   file:
