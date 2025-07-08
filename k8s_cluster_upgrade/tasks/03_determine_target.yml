@@ -63,12 +63,28 @@
   set_fact:
     k8s_target_minor_version: "{{ k8s_target_version | regex_replace('^v', '') | regex_replace('\\.[0-9]+$', '') }}"
 
+- name: "목표 버전 정보 디버깅"
+  debug:
+    msg:
+      - "목표 버전 디버깅 정보:"
+      - "  k8s_target_version: {{ k8s_target_version }}"
+      - "  k8s_target_minor_version: {{ k8s_target_minor_version }}"
+      - "  current_os_string: {{ current_os_string }}"
+      - "  매트릭스에 버전 존재: {{ k8s_target_minor_version in k8s_version_matrix }}"
+      - "  사용 가능한 매트릭스 버전: {{ k8s_version_matrix.keys() | list }}"
+
 - name: "OS 호환성 검증"
   fail:
     msg: "목표 버전 {{ k8s_target_version }}은 현재 OS ({{ current_os_string }})와 호환되지 않습니다."
   when:
     - k8s_target_minor_version in k8s_version_matrix
+    - k8s_version_matrix[k8s_target_minor_version].supported_os is defined
     - current_os_string not in k8s_version_matrix[k8s_target_minor_version].supported_os
+
+- name: "매트릭스에 없는 버전 경고"
+  debug:
+    msg: "경고: 목표 버전 {{ k8s_target_minor_version }}이 버전 매트릭스에 정의되지 않았습니다. OS 호환성 검증을 건너뜁니다."
+  when: k8s_target_minor_version not in k8s_version_matrix
 
 # 버전 비교 및 검증
 - name: "현재 버전과 목표 버전 비교"
