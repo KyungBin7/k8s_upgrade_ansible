@@ -179,7 +179,7 @@
 
 - name: "CRI-O 서비스 중지 확인"
   debug:
-    msg: "CRI-O 서비스 중지 {{ '성공' if not crio_stop_result.failed else '실패' }}"
+    msg: "CRI-O 서비스 중지 {{ '성공' if crio_stop_result is succeeded else '실패' }}"
   when: 
     - crio_needs_upgrade
     - crio_stop_result is defined
@@ -210,8 +210,8 @@
 - name: "공식 저장소 CRI-O 설치 결과 확인"
   debug:
     msg: 
-      - "YUM 설치: {{ 'N/A' if crio_official_yum_install is not defined else ('성공' if not crio_official_yum_install.failed else '실패') }}"
-      - "APT 설치: {{ 'N/A' if crio_official_apt_install is not defined else ('성공' if not crio_official_apt_install.failed else '실패') }}"
+      - "YUM 설치: {{ 'N/A' if crio_official_yum_install is not defined else ('성공' if crio_official_yum_install is succeeded else '실패') }}"
+      - "APT 설치: {{ 'N/A' if crio_official_apt_install is not defined else ('성공' if crio_official_apt_install is succeeded else '실패') }}"
   when: 
     - crio_needs_upgrade
     - crio_available_in_repo | default(false)
@@ -222,8 +222,8 @@
   when: 
     - crio_needs_upgrade
     - crio_available_in_repo | default(false)
-    - ((crio_official_yum_install is defined and crio_official_yum_install.failed) or 
-       (crio_official_apt_install is defined and crio_official_apt_install.failed))
+    - ((crio_official_yum_install is defined and crio_official_yum_install is failed) or 
+       (crio_official_apt_install is defined and crio_official_apt_install is failed))
 
 # 방법 2: 바이너리 방식으로 CRI-O 설치 (공식 저장소에 없는 경우)
 - name: "OpenSUSE 저장소 사용 가능성 확인"
@@ -352,7 +352,7 @@
 
 - name: "CRI-O 패키지 다운로드 결과 확인"
   debug:
-    msg: "CRI-O 패키지 다운로드 {{ '성공' if not crio_download_result.failed else '실패' }}: {{ crio_package_name }}"
+    msg: "CRI-O 패키지 다운로드 {{ '성공' if crio_download_result is succeeded else '실패' }}: {{ crio_package_name }}"
   when: 
     - crio_needs_upgrade
     - crio_download_result is defined
@@ -371,7 +371,7 @@
     - crio_package_name is defined
     - crio_package_name != ""
     - crio_download_result is defined
-    - not crio_download_result.failed
+    - crio_download_result is succeeded
 
 - name: "CRI-O 패키지 설치 결과 확인"
   debug:
@@ -389,7 +389,7 @@
     - opensuse_crio_repo_url is defined
     - opensuse_crio_repo_url != ""
     - crio_install_result is defined
-    - crio_install_result.failed
+    - crio_install_result is failed
 
 # CRI-O 설정 업데이트
 - name: "CRI-O 설정 백업"

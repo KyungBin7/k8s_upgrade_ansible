@@ -121,36 +121,3 @@ k8s_calico_force_upgrade: false       # 강제 업그레이드 (버전이 같아
 k8s_calico_backup_enabled: true       # Calico 설정 백업
 k8s_calico_upgrade_timeout: 300       # Calico 업그레이드 타임아웃 (초)
 k8s_calico_network_test: true         # 업그레이드 후 네트워크 테스트 수행
-
-# Kubernetes와 Calico 버전 호환성 매트릭스
-k8s_calico_version_matrix:
-  "1.23":
-    recommended_version: "v3.24.6"
-    minimum_version: "v3.22.0"
-    operator_version: "v1.30.9"
-    release_url: "https://github.com/projectcalico/calico/releases/download/v3.24.6/tigera-operator.yaml"
-    manifest_url: "https://raw.githubusercontent.com/projectcalico/calico/v3.24.6/manifests/calico.yaml"
-  "1.24":
-    recommended_version: "v3.25.2"
-    minimum_version: "v3.23.0"
-    operator_version: "v1.32.7"
-    release_url: "https://github.com/projectcalico/calico/releases/download/v3.25.2/tigera-operator.yaml"
-    manifest_url: "https://raw.githubusercontent.com/projectcalico/calico/v3.25.2/manifests/calico.yaml"
-  "1.25":
-    recommended_version: "v3.26.4"
-    minimum_version: "v3.24.0"
-    operator_version: "v1.34.3"
-    release_url: "https://github.com/projectcalico/calico/releases/download/v3.26.4/tigera-operator.yaml"
-    manifest_url: "https://raw.githubusercontent.com/projectcalico/calico/v3.26.4/manifests/calico.yaml"
-  "1.26":
-    recommended_version: "v3.27.4"
-    minimum_version: "v3.25.0"
-    operator_version: "v1.36.1"
-    release_url: "https://github.com/projectcalico/calico/releases/download/v3.27.4/tigera-operator.yaml"
-    manifest_url: "https://raw.githubusercontent.com/projectcalico/calico/v3.27.4/manifests/calico.yaml"
-  "1.27":
-    recommended_version: "v3.28.2"
-    minimum_version: "v3.26.0"
-    operator_version: "v1.38.1"
-    release_url: "https://github.com/projectcalico/calico/releases/download/v3.28.2/tigera-operator.yaml"
-    manifest_url: "https://raw.githubusercontent.com/projectcalico/calico/v3.28.2/manifests/calico.yaml" 
