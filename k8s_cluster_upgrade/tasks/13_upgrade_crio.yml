@@ -156,15 +156,26 @@
     - crio_needs_upgrade
     - k8s_crio_repo_check is defined
 
-# 공식 저장소에서 CRI-O 버전 확인 (RPM 기반)
-- name: "공식 K8s addons CRI-O 저장소 추가 (Rocky/RHEL)"
-  yum_repository:
-    name: "k8s-addons-crio-{{ crio_minor_version }}"
-    description: "Kubernetes addons CRI-O {{ crio_minor_version }}"
-    baseurl: "{{ k8s_crio_repo_url }}"
-    gpgcheck: no
-    enabled: yes
-    state: present
+# 공식 저장소에서 CRI-O 버전 확인 (RPM 기반) - 쉘 스크립트 방식
+- name: "공식 K8s addons CRI-O 저장소 설정 (Rocky/RHEL)"
+  shell: |
+    echo "=== K8s addons CRI-O 저장소 설정 ==="
+    echo "목표 버전: {{ crio_target_version }}"
+    echo "저장소 URL: {{ k8s_crio_repo_url }}"
+    
+    # 저장소 파일 생성
+    cat <<EOF > /etc/yum.repos.d/k8s-addons-crio.repo
+    [k8s-addons-crio]
+    name=Kubernetes addons CRI-O
+    baseurl={{ k8s_crio_repo_url }}
+    enabled=1
+    gpgcheck=1
+    gpgkey={{ k8s_crio_repo_url }}repodata/repomd.xml.key
+    EOF
+    
+    echo "저장소 파일이 생성되었습니다"
+    cat /etc/yum.repos.d/k8s-addons-crio.repo
+    echo "REPO_CONFIGURED"
   register: k8s_crio_repo_add
   when: 
     - crio_needs_upgrade
@@ -176,7 +187,6 @@
   shell: |
     echo "=== K8s addons CRI-O 저장소에서 패키지 확인 ==="
     echo "목표 버전: {{ crio_target_version }}"
-    echo "저장소 URL: {{ k8s_crio_repo_url }}"
     
     # yum 저장소 캐시 갱신
     yum makecache fast --quiet 2>/dev/null || true
@@ -190,7 +200,7 @@
     echo "검색2 (cri-o --showduplicates): $result2"
     
     # 3. 특정 저장소에서만 검색
-    result3=$(yum --disablerepo="*" --enablerepo="k8s-addons-crio-{{ crio_minor_version }}" list available cri-o 2>/dev/null || echo "search3_failed")
+    result3=$(yum --disablerepo="*" --enablerepo="k8s-addons-crio" list available cri-o 2>/dev/null || echo "search3_failed")
     echo "검색3 (특정 저장소): $result3"
     
     # 결과 분석
@@ -209,27 +219,27 @@
   when: 
     - crio_needs_upgrade
     - k8s_detected_package_manager == 'yum'
-    - k8s_crio_repo_check is defined
-    - k8s_crio_repo_check.status == 200
+    - k8s_crio_repo_add is defined
+    - k8s_crio_repo_add.stdout is defined
+    - k8s_crio_repo_add.stdout.find('REPO_CONFIGURED') != -1
   changed_when: false
 
-# 공식 저장소에서 CRI-O 버전 확인 (DEB 기반)
-- name: "공식 K8s addons CRI-O 저장소 GPG 키 추가 (Ubuntu/Debian)"
-  apt_key:
-    url: "https://pkgs.k8s.io/addons:/cri-o:/stable:/{{ crio_minor_version }}/deb/Release.key"
-    state: present
-  when: 
-    - crio_needs_upgrade
-    - k8s_detected_package_manager == 'apt'
-    - k8s_crio_repo_check is defined
-    - k8s_crio_repo_check.status == 200
-  ignore_errors: true
-
-- name: "공식 K8s addons CRI-O 저장소 추가 (Ubuntu/Debian)"
-  apt_repository:
-    repo: "deb {{ k8s_crio_deb_repo_url }} /"
-    state: present
-    filename: "k8s-addons-crio-{{ crio_minor_version }}"
+# 공식 저장소에서 CRI-O 버전 확인 (DEB 기반) - 쉘 스크립트 방식
+- name: "공식 K8s addons CRI-O 저장소 설정 (Ubuntu/Debian)"
+  shell: |
+    echo "=== K8s addons CRI-O 저장소 설정 ==="
+    echo "목표 버전: {{ crio_target_version }}"
+    echo "저장소 URL: {{ k8s_crio_deb_repo_url }}"
+    
+    # GPG 키 추가
+    curl -fsSL "{{ k8s_crio_deb_repo_url }}Release.key" | apt-key add - 2>/dev/null || true
+    
+    # 저장소 추가
+    echo "deb {{ k8s_crio_deb_repo_url }} /" > /etc/apt/sources.list.d/k8s-addons-crio.list
+    
+    echo "저장소 파일이 생성되었습니다"
+    cat /etc/apt/sources.list.d/k8s-addons-crio.list
+    echo "REPO_CONFIGURED"
   register: k8s_crio_deb_repo_add
   when: 
     - crio_needs_upgrade
@@ -241,7 +251,6 @@
   shell: |
     echo "=== K8s addons CRI-O 저장소에서 패키지 확인 ==="
     echo "목표 버전: {{ crio_target_version }}"
-    echo "저장소 URL: {{ k8s_crio_deb_repo_url }}"
     
     # apt 캐시 갱신
     apt-get update -qq 2>/dev/null || true
@@ -274,11 +283,12 @@
   when: 
     - crio_needs_upgrade
     - k8s_detected_package_manager == 'apt'
-    - k8s_crio_repo_check is defined
-    - k8s_crio_repo_check.status == 200
+    - k8s_crio_deb_repo_add is defined
+    - k8s_crio_deb_repo_add.stdout is defined
+    - k8s_crio_deb_repo_add.stdout.find('REPO_CONFIGURED') != -1
   changed_when: false
 
-# 공식 저장소 사용 가능 여부 확인
+# 공식 저장소 사용 가능 여부 확인 (타겟 버전이 있을 때만)
 - name: "공식 K8s addons CRI-O 저장소 사용 가능성 확인"
   set_fact:
     crio_available_in_repo: true
@@ -290,6 +300,18 @@
     - crio_repo_check.stdout is defined
     - crio_repo_check.rc == 0
     - "(crio_repo_check.stdout | regex_search('FOUND_IN_SEARCH[123]|FOUND_IN_MADISON|FOUND_IN_POLICY|FOUND_IN_SHOW')) is not none"
+
+# K8s addons 저장소에서 타겟 버전을 찾을 수 없는 경우 초기화
+- name: "K8s addons 저장소에서 타겟 버전 없음 - OpenSUSE 저장소로 fallback"
+  set_fact:
+    crio_available_in_repo: false
+  when: 
+    - crio_needs_upgrade
+    - (k8s_crio_repo_check is not defined or 
+       k8s_crio_repo_check.status != 200 or 
+       crio_repo_check is not defined or 
+       crio_repo_check.rc != 0 or 
+       (crio_repo_check.stdout | regex_search('FOUND_IN_SEARCH[123]|FOUND_IN_MADISON|FOUND_IN_POLICY|FOUND_IN_SHOW')) is none)
 
 - name: "CRI-O 저장소 확인 디버깅"
   debug:
@@ -337,13 +359,15 @@
 
 # 방법 1: K8s addons 저장소에서 CRI-O 업그레이드
 - name: "K8s addons 저장소에서 CRI-O 업그레이드 (Rocky/RHEL)"
-  yum:
-    name: 
-      - "cri-o-{{ crio_target_version }}"
-      - "cri-o-{{ crio_target_version }}*"
-    state: present
-    update_cache: yes
-    enablerepo: "k8s-addons-crio-{{ crio_minor_version }}"
+  shell: |
+    echo "=== K8s addons 저장소에서 CRI-O 설치 ==="
+    echo "목표 버전: {{ crio_target_version }}"
+    
+    # 특정 저장소에서만 설치
+    yum install -y --disablerepo="*" --enablerepo="k8s-addons-crio" cri-o
+    
+    echo "CRI-O 설치 완료"
+    crio version 2>&1 || echo "버전 확인 실패"
   register: crio_official_yum_install
   when: 
     - crio_needs_upgrade
@@ -351,11 +375,15 @@
     - crio_available_in_repo | default(false)
 
 - name: "K8s addons 저장소에서 CRI-O 업그레이드 (Ubuntu/Debian)"
-  apt:
-    name: "cri-o={{ crio_target_version }}-*"
-    state: present
-    update_cache: yes
-    allow_downgrade: yes
+  shell: |
+    echo "=== K8s addons 저장소에서 CRI-O 설치 ==="
+    echo "목표 버전: {{ crio_target_version }}"
+    
+    # apt로 설치
+    apt-get install -y cri-o
+    
+    echo "CRI-O 설치 완료"
+    crio version 2>&1 || echo "버전 확인 실패"
   register: crio_official_apt_install
   when: 
     - crio_needs_upgrade
@@ -365,9 +393,10 @@
 - name: "K8s addons 저장소 CRI-O 설치 결과 확인"
   debug:
     msg: 
-      - "YUM 설치: {{ 'N/A' if crio_official_yum_install is not defined else ('성공' if crio_official_yum_install is succeeded else '실패') }}"
-      - "APT 설치: {{ 'N/A' if crio_official_apt_install is not defined else ('성공' if crio_official_apt_install is succeeded else '실패') }}"
+      - "YUM 설치: {{ 'N/A' if crio_official_yum_install is not defined else ('성공' if crio_official_yum_install.rc == 0 else '실패') }}"
+      - "APT 설치: {{ 'N/A' if crio_official_apt_install is not defined else ('성공' if crio_official_apt_install.rc == 0 else '실패') }}"
       - "저장소 URL: {{ k8s_crio_repo_url if k8s_detected_package_manager == 'yum' else k8s_crio_deb_repo_url | default('N/A') }}"
+      - "설치 출력: {{ (crio_official_yum_install.stdout if crio_official_yum_install is defined else crio_official_apt_install.stdout if crio_official_apt_install is defined else 'N/A') }}"
   when: 
     - crio_needs_upgrade
     - crio_available_in_repo | default(false)
@@ -379,14 +408,15 @@
       - "목표 버전: {{ crio_target_version }}"
       - "패키지 관리자: {{ k8s_detected_package_manager }}"
       - "저장소 URL: {{ k8s_crio_repo_url if k8s_detected_package_manager == 'yum' else k8s_crio_deb_repo_url | default('N/A') }}"
-      - "YUM 결과: {{ 'N/A' if crio_official_yum_install is not defined else ('성공' if crio_official_yum_install is succeeded else '실패') }}"
-      - "APT 결과: {{ 'N/A' if crio_official_apt_install is not defined else ('성공' if crio_official_apt_install is succeeded else '실패') }}"
+      - "YUM 결과: {{ 'N/A' if crio_official_yum_install is not defined else ('성공' if crio_official_yum_install.rc == 0 else '실패') }}"
+      - "APT 결과: {{ 'N/A' if crio_official_apt_install is not defined else ('성공' if crio_official_apt_install.rc == 0 else '실패') }}"
+      - "오류 내용: {{ (crio_official_yum_install.stderr if crio_official_yum_install is defined else crio_official_apt_install.stderr if crio_official_apt_install is defined else 'N/A') }}"
       - "저장소 설정을 확인하거나 수동 설치를 진행해주세요."
   when: 
     - crio_needs_upgrade
     - crio_available_in_repo | default(false)
-    - ((crio_official_yum_install is defined and crio_official_yum_install is failed) or 
-       (crio_official_apt_install is defined and crio_official_apt_install is failed))
+    - ((crio_official_yum_install is defined and crio_official_yum_install.rc != 0) or 
+       (crio_official_apt_install is defined and crio_official_apt_install.rc != 0))
 
 # 방법 2: 바이너리 방식으로 CRI-O 설치 (K8s addons 저장소에 없는 경우)
 - name: "OpenSUSE 저장소 사용 가능성 확인"
@@ -768,4 +798,4 @@
 - name: "CRI-O 업그레이드 완료"
   debug:
     msg: "CRI-O 컨테이너 런타임 업그레이드가 완료되었습니다."
-  when: crio_needs_upgrade 
+  when: crio_needs_upgrade
