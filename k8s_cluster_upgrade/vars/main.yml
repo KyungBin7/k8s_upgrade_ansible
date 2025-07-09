@@ -1,5 +1,18 @@
 ---
 # Kubernetes 버전 맵핑 (마이너 버전별 호환성)
+
+# 알려진 버그가 있는 Kubernetes 버전들 (자동으로 회피됨)
+k8s_known_buggy_versions:
+  - version: "v1.29.15"
+    description: "치명적인 버그로 인해 프로덕션 사용 권장하지 않음"
+    replacement_version: "v1.29.16"
+    severity: "critical"
+    bypass_with_force: false  # 강제 모드에서도 우회 불가
+
+# 버전 자동 교체 설정
+k8s_enable_buggy_version_override: true
+k8s_buggy_version_override_behavior: "upgrade"  # upgrade, warn, fail
+
 k8s_version_matrix:
   "1.23":
     next_version: "1.24"
@@ -90,6 +103,10 @@ k8s_version_matrix:
     crio_version: "1.29"
     crio_minor_version: "1.29"
     opensuse_available: true
+    # 1.29.15 버전에는 치명적인 버그가 있음 - 자동으로 1.29.16+ 사용
+    minimum_safe_version: "v1.29.16"
+    buggy_versions: ["v1.29.15"]
+    version_override_enabled: true
   "1.30":
     next_version: "1.31"
     supported_os:

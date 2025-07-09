@@ -6,6 +6,7 @@
 
 - **자동 버전 감지**: 현재 Kubernetes 버전을 자동으로 감지
 - **스마트 업그레이드**: 다음 마이너 버전으로 자동 업그레이드 또는 수동 버전 지정
+- **버그 버전 자동 회피**: 알려진 버그가 있는 Kubernetes 버전을 자동으로 감지하고 안전한 버전으로 교체
 - **다중 설치 방식 지원**: 패키지 관리자(yum/apt) 및 바이너리 설치 모두 지원
 - **인텔리전트 Repository 선택**: K8s 공식 repo 지원 여부에 따라 자동으로 최적의 repo 선택
 - **롤링 업그레이드**: 무중단 서비스를 위한 순차적 노드 업그레이드
@@ -116,6 +117,15 @@ ansible_ssh_private_key_file=~/.ssh/id_rsa
 | `k8s_current_version` | `""` | 현재 버전 (자동 감지) |
 | `k8s_target_version` | `""` | 목표 버전 (미지정시 다음 버전) |
 | `k8s_force_version` | `false` | 강제 버전 지정 |
+
+### 버그 버전 회피 설정
+| 변수 | 기본값 | 설명 |
+|------|--------|------|
+| `k8s_enable_buggy_version_override` | `true` | 버그가 있는 버전 자동 회피 활성화 |
+| `k8s_buggy_version_check` | `true` | 버그가 있는 버전 체크 활성화 |
+| `k8s_allow_critical_buggy_versions` | `false` | 치명적인 버그가 있는 버전 허용 안 함 |
+
+> **⚠️ 중요**: Kubernetes 1.29.15는 치명적인 버그로 인해 자동으로 1.29.16+ 버전으로 교체됩니다.
 
 ### 업그레이드 설정
 | 변수 | 기본값 | 설명 |
