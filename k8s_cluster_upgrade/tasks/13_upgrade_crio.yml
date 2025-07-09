@@ -86,7 +86,7 @@
   when: crio_needs_upgrade
 
 # 1.28 이상 버전: prerelease 저장소 확인
-- name: "OpenSUSE prerelease 저장소 접근 가능성 확인 (1.28+)"
+- name: "OpenSUSE prerelease 저장소 접근 가능성 확인"
   uri:
     url: "{{ opensuse_crio_prerelease_url }}"
     method: GET
@@ -119,8 +119,8 @@
 - name: "OpenSUSE 저장소 접근 결과"
   debug:
     msg:
-      - "Prerelease 저장소 (1.28+): {{ 'N/A' if opensuse_prerelease_check is not defined else ('접근 성공' if opensuse_prerelease_check.status == 200 else '접근 실패') }}"
-      - "Stable 저장소 (1.27-): {{ 'N/A' if opensuse_stable_check is not defined else ('접근 성공' if opensuse_stable_check.status == 200 else '접근 실패') }}"
+      - "Prerelease 저장소 (1.28+): {{ 'N/A' if opensuse_prerelease_check is not defined else ('접근 성공' if opensuse_prerelease_check.status is defined and opensuse_prerelease_check.status == 200 else '접근 실패') }}"
+      - "Stable 저장소 (1.27-): {{ 'N/A' if opensuse_stable_check is not defined else ('접근 성공' if opensuse_stable_check.status is defined and opensuse_stable_check.status == 200 else '접근 실패') }}"
   when: 
     - crio_needs_upgrade
     - (opensuse_prerelease_check is defined or opensuse_stable_check is defined)
@@ -128,7 +128,7 @@
 # 사용 가능한 저장소 URL 설정
 - name: "사용 가능한 OpenSUSE 저장소 URL 설정"
   set_fact:
-    opensuse_crio_repo_url: "{{ opensuse_crio_prerelease_url if (opensuse_prerelease_check is defined and opensuse_prerelease_check.status == 200) else opensuse_crio_stable_url if (opensuse_stable_check is defined and opensuse_stable_check.status == 200) else '' }}"
+    opensuse_crio_repo_url: "{{ opensuse_crio_prerelease_url if (opensuse_prerelease_check is defined and opensuse_prerelease_check.status is defined and opensuse_prerelease_check.status == 200) else opensuse_crio_stable_url if (opensuse_stable_check is defined and opensuse_stable_check.status is defined and opensuse_stable_check.status == 200) else '' }}"
   when: 
     - crio_needs_upgrade
     - (opensuse_prerelease_check is defined or opensuse_stable_check is defined)
@@ -144,8 +144,8 @@
   debug:
     msg:
       - "CRI-O 저장소 확인 결과:"
-      - "  Prerelease 저장소 접근: {{ opensuse_prerelease_check.status | default('N/A') if opensuse_prerelease_check is defined else 'N/A' }}"
-      - "  Stable 저장소 접근: {{ opensuse_stable_check.status | default('N/A') if opensuse_stable_check is defined else 'N/A' }}"
+      - "  Prerelease 저장소 접근: {{ opensuse_prerelease_check.status | default('N/A') if opensuse_prerelease_check is defined and opensuse_prerelease_check.status is defined else 'N/A' }}"
+      - "  Stable 저장소 접근: {{ opensuse_stable_check.status | default('N/A') if opensuse_stable_check is defined and opensuse_stable_check.status is defined else 'N/A' }}"
       - "  선택된 저장소 URL: {{ opensuse_crio_repo_url | default('없음') }}"
       - "  OpenSUSE 저장소 사용 가능: {{ opensuse_crio_available | default(false) }}"
   when: 
@@ -161,8 +161,8 @@
       - "목표 CRI-O 버전: {{ crio_target_version | default('N/A') }}"
       - "패키지 관리자: {{ k8s_detected_package_manager | default('unknown') }}"
       - "--- 저장소 상태 ---"
-      - "Prerelease 저장소 (1.28+): {{ opensuse_crio_prerelease_url | default('N/A') }}"
-      - "Stable 저장소 (1.27-): {{ opensuse_crio_stable_url | default('N/A') }}"
+      - "Prerelease 저장소 (1.28+): {{ opensuse_crio_prerelease_url | default('N/A') }} (상태: {{ opensuse_prerelease_check.status | default('N/A') if opensuse_prerelease_check is defined and opensuse_prerelease_check.status is defined else 'N/A' }})"
+      - "Stable 저장소 (1.27-): {{ opensuse_crio_stable_url | default('N/A') }} (상태: {{ opensuse_stable_check.status | default('N/A') if opensuse_stable_check is defined and opensuse_stable_check.status is defined else 'N/A' }})"
       - "선택된 저장소 URL: {{ opensuse_crio_repo_url | default('N/A') }}"
       - "OpenSUSE 저장소 사용 가능: {{ opensuse_crio_available | default(false) }}"
       - "--- 다음 단계 ---"
@@ -199,8 +199,8 @@
   fail:
     msg: 
       - "모든 CRI-O 저장소에 접근할 수 없습니다."
-      - "Prerelease 저장소 (1.28+): {{ opensuse_crio_prerelease_url | default('N/A') }} (상태: {{ opensuse_prerelease_check.status | default('N/A') if opensuse_prerelease_check is defined else 'N/A' }})"
-      - "Stable 저장소 (1.27-): {{ opensuse_crio_stable_url | default('N/A') }} (상태: {{ opensuse_stable_check.status | default('N/A') if opensuse_stable_check is defined else 'N/A' }})"
+      - "Prerelease 저장소 (1.28+): {{ opensuse_crio_prerelease_url | default('N/A') }} (상태: {{ opensuse_prerelease_check.status | default('N/A') if opensuse_prerelease_check is defined and opensuse_prerelease_check.status is defined else 'N/A' }})"
+      - "Stable 저장소 (1.27-): {{ opensuse_crio_stable_url | default('N/A') }} (상태: {{ opensuse_stable_check.status | default('N/A') if opensuse_stable_check is defined and opensuse_stable_check.status is defined else 'N/A' }})"
       - "네트워크 연결을 확인하거나 수동으로 CRI-O를 설치해주세요."
   when: 
     - crio_needs_upgrade
