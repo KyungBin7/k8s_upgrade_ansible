@@ -185,4 +185,4 @@ k8s_opensuse_crio_base_url: "https://download.opensuse.org/repositories/devel:/k
 k8s_opensuse_os_version: "CentOS_8"
 
 # 새로운 prerelease 저장소 (1.28 이상 버전용)
-k8s_opensuse_crio_prerelease_base_url: "https://download.opensuse.org/repositories/isv:/cri-o:/prerelease:/v" 
+k8s_opensuse_crio_prerelease_base_url: "https://download.opensuse.org/repositories/isv:/cri-o:/stable:/v" 
