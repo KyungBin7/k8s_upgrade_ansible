@@ -105,25 +105,6 @@ ansible-playbook playbook.yml --limit k8s_masters
 ansible-playbook playbook.yml --limit k8s_workers
 ```
 
-### 시나리오 6: 버그 버전 자동 회피
-
-```bash
-# 기본적으로 버그가 있는 버전은 자동으로 회피됩니다
-# 예: 1.29.15 → 1.29.16+ 자동 교체
-
-# 버그 버전 회피 비활성화 (권장하지 않음)
-ansible-playbook playbook.yml -e "k8s_enable_buggy_version_override=false"
-
-# 강제로 버그가 있는 버전 사용 (매우 위험)
-ansible-playbook playbook.yml -e "k8s_target_version=v1.29.15" -e "k8s_force_version=true"
-
-# 버그 버전 정보 확인
-ansible-playbook playbook.yml --tags target -v
-```
-
-> **⚠️ 중요**: Kubernetes 1.29.15는 치명적인 버그가 있어 자동으로 1.29.16+ 버전으로 교체됩니다.
-> 강제 모드(`k8s_force_version=true`)를 사용해도 치명적인 버그가 있는 버전은 차단됩니다.
-
 ## ⚙️ 고급 설정
 
 ### 업그레이드 전략 변경
