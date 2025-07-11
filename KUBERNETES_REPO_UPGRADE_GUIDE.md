@@ -29,19 +29,39 @@ Kubernetes 1.29에서 1.30으로 업그레이드 시 패키지 설치 문제가 
 
 k8s_legacy_repo_max_version: "1.29"
 k8s_community_repo_min_version: "1.24"
+
+# 1.30 이후 올바른 GPG 키 경로 설정
+k8s_community_repo_config:
+  apt:
+    gpg_key: "https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key"
 ```
 
 ### 2. 버전별 로직 분기 (`06_check_official_repo.yml`)
 
 #### 1.29까지 (기존 로직 유지)
-- 1.28 이상: pkgs.k8s.io 사용 시도
-- 1.27 이하: 레거시 repo 사용
-- 실패 시 바이너리 설치로 폴백
+- 1.28 이상: 공식 repo 체크 후 사용 결정
+- 1.28 미만: 레거시 repo 사용
 
 #### 1.30 이후 (새로운 로직)
-- **무조건 커뮤니티 repo** (`pkgs.k8s.io`) 사용
-- 버전별 전용 레포지토리 자동 선택
-- 레거시 repo 사용 안함
+- **커뮤니티 repo 무조건 사용**
+- 레포지토리 구조: `pkgs.k8s.io/core:/stable:/v1.30/`
+- 올바른 GPG 키 경로 사용
+
+### 3. 패키지 설치 로직 수정 (`20_install_packages.yml`)
+
+#### 🔧 주요 수정사항
+- **APT GPG 키 설정 오류 수정**: 기존에 YUM GPG 키를 참조하던 문제 해결
+- **올바른 GPG 키 경로 사용**: 
+  - YUM: `repodata/repomd.xml.key`
+  - APT: `deb/Release.key`
+
+```yaml
+# 수정 전 (잘못된 설정)
+url: "{{ k8s_selected_repo_config.yum.gpg_key if k8s_use_official_repo else 'legacy' }}"
+
+# 수정 후 (올바른 설정)
+url: "{{ k8s_selected_repo_config.apt.gpg_key | default('legacy') }}"
+```
 
 ### 3. 지원 버전 확장
 - **1.31, 1.32, 1.33** 버전 매트릭스 추가
@@ -131,3 +151,43 @@ k8s_community_repo_min_version: "1.24"
 📅 **작성일**: 2025년 1월 8일  
 🔄 **적용 버전**: Kubernetes 1.24 ~ 1.33  
 ✅ **테스트 완료**: 1.29→1.30→1.31→1.32→1.33 순차 업그레이드 
+
+## 🎯 1.30 업그레이드 실패 문제 해결 핵심 수정사항
+
+### ❌ 문제 원인
+1. **APT GPG 키 설정 오류**: APT 설정에서 YUM GPG 키를 참조
+2. **GPG 키 경로 변경**: 1.30 이후 GPG 키 경로가 변경됨
+3. **버전별 repo 선택 로직 문제**: 1.30 이후 올바른 커뮤니티 repo 선택 안됨
+
+### ✅ 해결 방법
+
+#### 1. APT GPG 키 설정 수정
+```yaml
+# 기존 (잘못된 설정)
+url: "{{ k8s_selected_repo_config.yum.gpg_key if k8s_use_official_repo ... }}"
+
+# 수정 (올바른 설정) 
+url: "{{ k8s_selected_repo_config.apt.gpg_key | default('legacy') }}"
+```
+
+#### 2. 1.30 이후 올바른 GPG 키 경로 설정
+```yaml
+# vars/main.yml 수정
+k8s_community_repo_config:
+  apt:
+    gpg_key: "https://pkgs.k8s.io/core:/stable:/v1.30/deb/Release.key"
+  yum:
+    gpg_key: "https://pkgs.k8s.io/core:/stable:/v1.30/rpm/repodata/repomd.xml.key"
+```
+
+#### 3. 버전별 repo 선택 로직 개선
+```yaml
+# 06_check_official_repo.yml 수정
+k8s_selected_repo_config: >-
+  {{
+    k8s_community_repo_config if not (k8s_use_legacy_logic | bool)
+    else (k8s_official_repo_config if k8s_use_official_repo | default(false) else k8s_legacy_repo_config)
+  }}
+```
+
+--- 

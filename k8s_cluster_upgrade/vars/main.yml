@@ -171,13 +171,14 @@ k8s_official_repo_config:
       - kubectl
   apt:
     repo_url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/deb/"
+    gpg_key: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/deb/Release.key"
     keyring_path: "/etc/apt/keyrings/kubernetes-apt-keyring.gpg"
     packages:
       - kubelet
       - kubeadm
       - kubectl
 
-# 1.30 이후 버전용 커뮤니티 repo 설정 (1.29까지와 동일하지만 명시적 분리)
+# 1.30 이후 버전용 커뮤니티 repo 설정
 k8s_community_repo_config:
   yum:
     repo_name: "kubernetes"
@@ -189,6 +190,7 @@ k8s_community_repo_config:
       - kubectl
   apt:
     repo_url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/deb/"
+    gpg_key: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/deb/Release.key"
     keyring_path: "/etc/apt/keyrings/kubernetes-apt-keyring.gpg"
     packages:
       - kubelet

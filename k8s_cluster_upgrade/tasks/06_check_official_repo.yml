@@ -138,18 +138,19 @@
   set_fact:
     k8s_selected_repo_config: >-
       {{
-        k8s_official_repo_config if k8s_use_official_repo | default(false)
-        else (k8s_legacy_repo_config if k8s_use_legacy_logic | bool else k8s_package_config)
+        k8s_community_repo_config if not (k8s_use_legacy_logic | bool)
+        else (k8s_official_repo_config if k8s_use_official_repo | default(false) else k8s_legacy_repo_config)
       }}
 
 - name: "선택된 repo 설정 표시"
   debug:
     msg:
       - "=== 선택된 Repository 설정 ==="
-      - "사용 repo: {% if k8s_use_official_repo | default(false) %}{% if k8s_use_legacy_logic | bool %}공식 (pkgs.k8s.io){% else %}커뮤니티 (pkgs.k8s.io){% endif %}{% else %}레거시{% endif %}"
+      - "사용 repo: {% if not (k8s_use_legacy_logic | bool) %}커뮤니티 (pkgs.k8s.io - 1.30+){% elif k8s_use_official_repo | default(false) %}공식 (pkgs.k8s.io - 1.28+){% else %}레거시{% endif %}"
       - "YUM Repository: {{ k8s_selected_repo_config.yum.repo_baseurl | default('N/A') }}"
       - "APT Repository: {{ k8s_selected_repo_config.apt.repo_url | default('N/A') }}"
-      - "GPG Key: {{ k8s_selected_repo_config.yum.gpg_key | default(k8s_selected_repo_config.apt.keyring_path) | default('N/A') }}"
+      - "YUM GPG Key: {{ k8s_selected_repo_config.yum.gpg_key | default('N/A') }}"
+      - "APT GPG Key: {{ k8s_selected_repo_config.apt.gpg_key | default('N/A') }}"
 
 # 패키지 매니저 정보 최종 표시 
 - name: "최종 패키지 매니저 정보 표시"
