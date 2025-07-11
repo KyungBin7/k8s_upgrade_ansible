@@ -114,7 +114,7 @@ k8s_version_matrix:
       - ubuntu-20.04
       - ubuntu-22.04
       - ubuntu-24.04
-    etcd_version: "3.5.17"
+    etcd_version: "3.5.15"
     crio_version: "1.31"
     crio_minor_version: "1.31"
     opensuse_available: true
@@ -128,12 +128,12 @@ k8s_version_matrix:
       - ubuntu-20.04
       - ubuntu-22.04
       - ubuntu-24.04
-    etcd_version: "3.5.18"
+    etcd_version: "3.5.15"
     crio_version: "1.32"
     crio_minor_version: "1.32"
     opensuse_available: true
   "1.33":
-    next_version: "1.34"
+    next_version: ""
     supported_os:
       - rocky-8
       - rocky-9
@@ -142,7 +142,7 @@ k8s_version_matrix:
       - ubuntu-20.04
       - ubuntu-22.04
       - ubuntu-24.04
-    etcd_version: "3.5.19"
+    etcd_version: "3.5.15"
     crio_version: "1.33"
     crio_minor_version: "1.33"
     opensuse_available: true
@@ -163,15 +163,16 @@ k8s_systemd_files:
 k8s_official_repo_config:
   yum:
     repo_name: "kubernetes"
-    repo_baseurl: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/rpm/"
-    gpg_key: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/rpm/repodata/repomd.xml.key"
+    repo_baseurl: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('^v?([0-9]+\\.[0-9]+).*', '\\1') }}/rpm/"
+    gpg_key: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('^v?([0-9]+\\.[0-9]+).*', '\\1') }}/rpm/repodata/repomd.xml.key"
     packages:
       - kubelet
       - kubeadm  
       - kubectl
   apt:
-    repo_url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/deb/"
+    repo_url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('^v?([0-9]+\\.[0-9]+).*', '\\1') }}/deb/"
     keyring_path: "/etc/apt/keyrings/kubernetes-apt-keyring.gpg"
+    gpg_key: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('^v?([0-9]+\\.[0-9]+).*', '\\1') }}/deb/Release.key"
     packages:
       - kubelet
       - kubeadm
@@ -196,8 +197,8 @@ k8s_package_config:
       - kubectl
 
 # K8s 공식 repo 최소 지원 버전 (동적으로 체크됨)
-k8s_official_repo_min_version: "1.28"
-k8s_official_repo_check_url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/rpm/repodata/repomd.xml"
+k8s_official_repo_min_version: "1.24"
+k8s_official_repo_check_url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('^v?([0-9]+\\.[0-9]+).*', '\\1') }}/rpm/repodata/repomd.xml"
 
 # 노드 역할 감지를 위한 파일 경로들
 k8s_master_indicators:

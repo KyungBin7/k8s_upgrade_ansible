@@ -36,10 +36,10 @@
   when: ansible_os_family == "Debian"
   ignore_errors: true
 
-# 버전별 공식 repo 지원 여부 확인 (1.28 미만은 공식 repo에서 지원하지 않음)
+# 버전별 공식 repo 지원 여부 확인 (1.24 미만은 공식 repo에서 지원하지 않음)
 - name: "목표 버전이 공식 repo 최소 지원 버전 이상인지 확인"
   set_fact:
-    k8s_version_supports_official_repo: "{{ k8s_target_minor_for_repo is version('1.28', '>=') }}"
+    k8s_version_supports_official_repo: "{{ k8s_target_minor_for_repo is version('1.24', '>=') }}"
 
 # 공식 repo 사용 가능 여부 결정 - 버전 체크 우선
 - name: "공식 repo 사용 가능 여부 결정 (YUM)"
@@ -62,8 +62,8 @@
     k8s_use_official_repo: true
   when: k8s_detected_package_manager == 'binary'
 
-# 1.28 미만 버전에서 패키지 매니저 사용 시 강제로 바이너리 모드로 변경
-- name: "1.28 미만 버전 패키지 매니저 감지 시 바이너리 모드로 변경"
+# 1.24 미만 버전에서 패키지 매니저 사용 시 강제로 바이너리 모드로 변경
+- name: "1.24 미만 버전 패키지 매니저 감지 시 바이너리 모드로 변경"
   set_fact:
     k8s_detected_package_manager: "binary"
     k8s_use_official_repo: true
@@ -91,7 +91,7 @@
       {% if k8s_detected_package_manager == 'binary' %}
       ✓ Kubernetes 바이너리 설치를 사용하여 {{ k8s_target_version }} 버전으로 업그레이드합니다
       {% if not k8s_version_supports_official_repo | default(true) %}
-      사유: {{ k8s_target_version }} 버전은 공식 repository에서 지원하지 않음 (최소 1.28 이상)
+      사유: {{ k8s_target_version }} 버전은 공식 repository에서 지원하지 않음 (최소 1.24 이상)
       {% endif %}
       {% elif k8s_use_official_repo | default(false) %}
       ✓ Kubernetes 공식 repository를 사용하여 {{ k8s_target_version }} 버전으로 업그레이드합니다
