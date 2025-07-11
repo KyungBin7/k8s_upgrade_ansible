@@ -158,39 +158,20 @@ k8s_binary_files:
 k8s_systemd_files:
   kubelet_service: "https://raw.githubusercontent.com/kubernetes/release/v0.16.2/cmd/krel/templates/latest/kubelet/kubelet.service"
   kubeadm_conf: "https://raw.githubusercontent.com/kubernetes/release/v0.16.2/cmd/krel/templates/latest/kubeadm/10-kubeadm.conf"
-
-# K8s 공식 repo 설정
+ 
+# K8s CDN 기반 repo 설정 (1.24부터 1.33까지 지원)
 k8s_official_repo_config:
   yum:
     repo_name: "kubernetes"
-    repo_baseurl: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/rpm/"
-    gpg_key: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/rpm/repodata/repomd.xml.key"
+    repo_baseurl: "https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/rpm/"
+    gpg_key: "https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/rpm/repodata/repomd.xml.key"
     packages:
       - kubelet
       - kubeadm  
       - kubectl
   apt:
-    repo_url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/deb/"
-    gpg_key: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/deb/Release.key"
-    keyring_path: "/etc/apt/keyrings/kubernetes-apt-keyring.gpg"
-    packages:
-      - kubelet
-      - kubeadm
-      - kubectl
-
-# 1.30 이후 버전용 커뮤니티 repo 설정
-k8s_community_repo_config:
-  yum:
-    repo_name: "kubernetes"
-    repo_baseurl: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/rpm/"
-    gpg_key: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/rpm/repodata/repomd.xml.key"
-    packages:
-      - kubelet
-      - kubeadm  
-      - kubectl
-  apt:
-    repo_url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/deb/"
-    gpg_key: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/deb/Release.key"
+    repo_url: "https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/deb/"
+    gpg_key: "https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/deb/Release.key"
     keyring_path: "/etc/apt/keyrings/kubernetes-apt-keyring.gpg"
     packages:
       - kubelet
@@ -234,13 +215,13 @@ k8s_legacy_repo_config:
       - kubectl
 
 # K8s 공식 repo 최소 지원 버전 (동적으로 체크됨)
-k8s_official_repo_min_version: "1.28"
-k8s_official_repo_check_url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/rpm/repodata/repomd.xml"
+k8s_official_repo_min_version: "1.24"
+k8s_official_repo_check_url: "https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v{{ k8s_target_version | regex_replace('\\.[0-9]+$', '') }}/rpm/repodata/repomd.xml"
 
 # K8s 커뮤니티 repo 최소 지원 버전 (1.24부터 지원)
 k8s_community_repo_min_version: "1.24"
-# 레거시 repo 최대 지원 버전 (1.29까지)
-k8s_legacy_repo_max_version: "1.29"
+# 레거시 repo 최대 지원 버전 (1.23까지, 새로운 CDN이 1.24부터 지원하므로)
+k8s_legacy_repo_max_version: "1.23"
 
 # 노드 역할 감지를 위한 파일 경로들
 k8s_master_indicators:

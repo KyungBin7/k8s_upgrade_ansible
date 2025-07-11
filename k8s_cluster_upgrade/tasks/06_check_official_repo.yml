@@ -26,63 +26,63 @@
       - "레거시 로직 사용: {{ k8s_use_legacy_logic }}"
       - "레거시 지원 최대 버전: {{ k8s_legacy_repo_max_version }}"
 
-# === 1.29까지 기존 로직 ===
-# 공식 repo 지원 버전 확인 (yum) - 1.29까지만
-- name: "공식 repo 지원 확인 (YUM) - 1.29까지"
+# === 1.24 이상 새로운 CDN 기반 로직 ===
+# 공식 repo 지원 버전 확인 (yum) - 1.24 이상
+- name: "CDN repo 지원 확인 (YUM) - 1.24 이상"
   uri:
-    url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_minor_for_repo }}/rpm/repodata/repomd.xml"
+    url: "https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v{{ k8s_target_minor_for_repo }}/rpm/repodata/repomd.xml"
     method: HEAD
     timeout: 10
     status_code: [200, 404]
   register: official_repo_yum_check
   when: 
     - ansible_os_family == "RedHat"
-    - k8s_use_legacy_logic | bool
+    - not k8s_use_legacy_logic | bool
   ignore_errors: true
 
-# 공식 repo 지원 버전 확인 (apt) - 1.29까지만
-- name: "공식 repo 지원 확인 (APT) - 1.29까지"
+# 공식 repo 지원 버전 확인 (apt) - 1.24 이상
+- name: "CDN repo 지원 확인 (APT) - 1.24 이상"
   uri:
-    url: "https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_minor_for_repo }}/deb/Release"
+    url: "https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v{{ k8s_target_minor_for_repo }}/deb/Release"
     method: HEAD
     timeout: 10
     status_code: [200, 404]
   register: official_repo_apt_check
   when: 
     - ansible_os_family == "Debian"
-    - k8s_use_legacy_logic | bool
+    - not k8s_use_legacy_logic | bool
   ignore_errors: true
 
-# 버전별 공식 repo 지원 여부 확인 (1.28 미만은 공식 repo에서 지원하지 않음) - 1.29까지만
-- name: "목표 버전이 공식 repo 최소 지원 버전 이상인지 확인 - 1.29까지"
+# === 1.23 이하 레거시 로직 ===
+# 레거시 버전 처리 (1.23 이하)
+- name: "레거시 버전 처리 - 1.23 이하"
   set_fact:
-    k8s_version_supports_official_repo: "{{ k8s_target_minor_for_repo is version('1.28', '>=') }}"
+    k8s_use_official_repo: false
+    k8s_version_supports_official_repo: false
   when: k8s_use_legacy_logic | bool
 
-# 공식 repo 사용 가능 여부 결정 - 버전 체크 우선 (1.29까지만)
-- name: "공식 repo 사용 가능 여부 결정 (YUM) - 1.29까지"
+# 버전별 공식 repo 지원 여부 확인 (1.24 이상은 CDN repo에서 지원)
+- name: "목표 버전이 CDN repo 최소 지원 버전 이상인지 확인 - 1.24 이상"
+  set_fact:
+    k8s_version_supports_official_repo: "{{ k8s_target_minor_for_repo is version('1.24', '>=') }}"
+  when: not k8s_use_legacy_logic | bool
+
+# CDN repo 사용 가능 여부 결정 (1.24 이상)
+- name: "CDN repo 사용 가능 여부 결정 (YUM) - 1.24 이상"
   set_fact:
     k8s_use_official_repo: "{{ k8s_version_supports_official_repo and (official_repo_yum_check.status == 200) }}"
   when: 
     - ansible_os_family == "RedHat"
     - official_repo_yum_check is defined
-    - k8s_use_legacy_logic | bool
+    - not k8s_use_legacy_logic | bool
 
-- name: "공식 repo 사용 가능 여부 결정 (APT) - 1.29까지"
+- name: "CDN repo 사용 가능 여부 결정 (APT) - 1.24 이상"
   set_fact:
     k8s_use_official_repo: "{{ k8s_version_supports_official_repo and (official_repo_apt_check.status == 200) }}"
   when: 
     - ansible_os_family == "Debian"
     - official_repo_apt_check is defined
-    - k8s_use_legacy_logic | bool
-
-# === 1.30부터 새로운 로직 ===
-# 1.30부터는 커뮤니티 repo 무조건 사용
-- name: "1.30 이후 버전 커뮤니티 repo 사용 설정"
-  set_fact:
-    k8s_use_official_repo: true
-    k8s_version_supports_official_repo: true
-  when: not (k8s_use_legacy_logic | bool)
+    - not k8s_use_legacy_logic | bool
 
 # 바이너리 설치의 경우 항상 공식 repo 사용
 - name: "바이너리 설치 시 공식 repo 사용"
@@ -90,8 +90,8 @@
     k8s_use_official_repo: true
   when: k8s_detected_package_manager == 'binary'
 
-# 1.28 미만 버전에서 패키지 매니저 사용 시 강제로 바이너리 모드로 변경 (1.29까지만)
-- name: "1.28 미만 버전 패키지 매니저 감지 시 바이너리 모드로 변경"
+# 1.28 미만 버전에서 패키지 매니저 사용 시 강제로 바이너리 모드로 변경 (1.23 이하만)
+- name: "1.24 미만 버전 패키지 매니저 감지 시 바이너리 모드로 변경"
   set_fact:
     k8s_detected_package_manager: "binary"
     k8s_use_official_repo: true
@@ -120,33 +120,34 @@
       {% if k8s_detected_package_manager == 'binary' %}
       ✓ Kubernetes 바이너리 설치를 사용하여 {{ k8s_target_version }} 버전으로 업그레이드합니다
       {% if k8s_use_legacy_logic | bool and not k8s_version_supports_official_repo | default(true) %}
-      사유: {{ k8s_target_version }} 버전은 공식 repository에서 지원하지 않음 (최소 1.28 이상)
+      사유: {{ k8s_target_version }} 버전은 CDN repository에서 지원하지 않음 (최소 1.24 이상)
       {% endif %}
       {% elif k8s_use_official_repo | default(false) %}
-      ✓ Kubernetes {% if k8s_use_legacy_logic | bool %}공식{% else %}커뮤니티{% endif %} repository를 사용하여 {{ k8s_target_version }} 버전으로 업그레이드합니다
-      Repository: https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_minor_for_repo }}
+      ✓ Kubernetes CDN repository를 사용하여 {{ k8s_target_version }} 버전으로 업그레이드합니다
+      Repository: https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v{{ k8s_target_minor_for_repo }}
       {% if not k8s_use_legacy_logic | bool %}
-      참고: v1.30부터는 커뮤니티 소유 repository만 사용됩니다
+      참고: v1.24부터는 안정적인 CDN repository를 사용합니다
       {% endif %}
       {% else %}
-      ⚠ Kubernetes {% if k8s_use_legacy_logic | bool %}공식{% else %}커뮤니티{% endif %} repository에서 {{ k8s_target_version }} 버전을 지원하지 않습니다
+      ⚠ Kubernetes CDN repository에서 {{ k8s_target_version }} 버전을 지원하지 않습니다
       레거시 repository를 사용합니다: {{ 'packages.cloud.google.com (yum)' if ansible_os_family == 'RedHat' else 'apt.kubernetes.io (apt)' }}
       {% endif %}
 
-# 사용할 repo 설정 결정
+# 사용할 repo 설정 결정 (통합된 로직)
 - name: "사용할 repo 설정 결정"
   set_fact:
     k8s_selected_repo_config: >-
       {{
-        k8s_community_repo_config if not (k8s_use_legacy_logic | bool)
-        else (k8s_official_repo_config if k8s_use_official_repo | default(false) else k8s_legacy_repo_config)
+        k8s_official_repo_config if (k8s_use_official_repo | default(false) and not k8s_use_legacy_logic | bool)
+        else (k8s_official_repo_config if (k8s_use_official_repo | default(false) and k8s_use_legacy_logic | bool)
+        else k8s_legacy_repo_config)
       }}
 
 - name: "선택된 repo 설정 표시"
   debug:
     msg:
       - "=== 선택된 Repository 설정 ==="
-      - "사용 repo: {% if not (k8s_use_legacy_logic | bool) %}커뮤니티 (pkgs.k8s.io - 1.30+){% elif k8s_use_official_repo | default(false) %}공식 (pkgs.k8s.io - 1.28+){% else %}레거시{% endif %}"
+      - "사용 repo: {% if k8s_use_official_repo | default(false) %}CDN (prod-cdn.packages.k8s.io - 1.24+){% else %}레거시{% endif %}"
       - "YUM Repository: {{ k8s_selected_repo_config.yum.repo_baseurl | default('N/A') }}"
       - "APT Repository: {{ k8s_selected_repo_config.apt.repo_url | default('N/A') }}"
       - "YUM GPG Key: {{ k8s_selected_repo_config.yum.gpg_key | default('N/A') }}"
@@ -160,9 +161,9 @@
       - "감지된 패키지 매니저: {{ k8s_detected_package_manager }}"
       - "바이너리 설치 필요: {{ k8s_needs_binary_install | default(false) }}"
       - "패키지 설치 필요: {{ k8s_needs_package_install | default(false) }}"
-      - "버전별 로직: {% if k8s_use_legacy_logic | bool %}레거시 ({{ k8s_legacy_repo_max_version }}까지){% else %}커뮤니티 ({{ k8s_community_repo_min_version }}부터){% endif %}"
-      - "공식/커뮤니티 repo 지원 버전: {{ k8s_version_supports_official_repo | default('N/A') }}"
-      - "공식/커뮤니티 repo 사용: {{ k8s_use_official_repo | default(false) }}"
+      - "버전별 로직: {% if k8s_use_legacy_logic | bool %}레거시 ({{ k8s_legacy_repo_max_version }}까지){% else %}CDN ({{ k8s_community_repo_min_version }}부터){% endif %}"
+      - "CDN repo 지원 버전: {{ k8s_version_supports_official_repo | default('N/A') }}"
+      - "CDN repo 사용: {{ k8s_use_official_repo | default(false) }}"
 
 # 백업 디렉토리 존재 확인
 - name: "백업 디렉토리 존재 확인"
@@ -199,12 +200,12 @@
       
       {% if ansible_os_family == "RedHat" and official_repo_yum_check is defined %}
       YUM Repo Check Status: {{ official_repo_yum_check.status | default('Failed') }}
-      YUM Repo URL: https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_minor_for_repo }}/rpm/
+      YUM Repo URL: https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v{{ k8s_target_minor_for_repo }}/rpm/
       {% endif %}
       
       {% if ansible_os_family == "Debian" and official_repo_apt_check is defined %}
       APT Repo Check Status: {{ official_repo_apt_check.status | default('Failed') }}
-      APT Repo URL: https://pkgs.k8s.io/core:/stable:/v{{ k8s_target_minor_for_repo }}/deb/
+      APT Repo URL: https://prod-cdn.packages.k8s.io/repositories/isv:/kubernetes:/core:/stable:/v{{ k8s_target_minor_for_repo }}/deb/
       {% endif %}
       
       Selected Installation Method:
