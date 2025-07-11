@@ -37,7 +37,9 @@
     return_content: yes
   register: latest_patch_version
   ignore_errors: true
-  when: network_check is not failed
+  when: 
+    - network_check is not failed
+    - not (k8s_version_fallback_enabled | default(false) and (k8s_next_version | default(k8s_target_version | regex_replace('^v', '') | regex_replace('\\.[0-9]+$', '')) is version(k8s_version_fallback_min_version | default('1.30'), '>=')))
 
 - name: "최신 패치 버전 응답 디버그"
   debug:
@@ -53,6 +55,16 @@
     - latest_patch_version.content is defined
     - not k8s_force_version
     - k8s_target_version != ""
+
+- name: "1.30 이후 버전 온라인 확인 건너뛰기 알림"
+  debug:
+    msg:
+      - "ℹ️  1.30 이후 버전에 대해서는 온라인 최신 패치 확인을 건너뛰고 fallback 로직을 사용합니다."
+      - "  대상 버전: {{ k8s_next_version | default(k8s_target_version | regex_replace('^v', '') | regex_replace('\\.[0-9]+$', '')) }}"
+      - "  현재 타겟 버전: {{ k8s_target_version }}"
+  when:
+    - k8s_version_fallback_enabled | default(false)
+    - (k8s_next_version | default(k8s_target_version | regex_replace('^v', '') | regex_replace('\\.[0-9]+$', '')) is version(k8s_version_fallback_min_version | default('1.30'), '>='))
 
 # OS 호환성 확인
 - name: "현재 OS 문자열 생성"
@@ -90,17 +102,18 @@
 - name: "1.30 이후 버전에 대한 fallback 활성화 여부 확인"
   set_fact:
     k8s_need_fallback: "{{ k8s_target_minor_version is version(k8s_version_fallback_min_version, '>=') }}"
-  when: k8s_version_fallback_enabled
+  when: k8s_version_fallback_enabled | default(false)
 
 - name: "Fallback 적용 여부 디버깅"
   debug:
     msg:
-      - "Fallback 설정 확인:"
-      - "  fallback_enabled: {{ k8s_version_fallback_enabled }}"
-      - "  target_minor_version: {{ k8s_target_minor_version }}"
-      - "  fallback_min_version: {{ k8s_version_fallback_min_version }}"
+      - "🔍 Fallback 설정 확인:"
+      - "  fallback_enabled: {{ k8s_version_fallback_enabled | default(false) }}"
+      - "  target_minor_version: {{ k8s_target_minor_version | default('N/A') }}"
+      - "  fallback_min_version: {{ k8s_version_fallback_min_version | default('N/A') }}"
       - "  need_fallback: {{ k8s_need_fallback | default(false) }}"
-  when: k8s_version_fallback_enabled
+      - "  current_target_version: {{ k8s_target_version | default('N/A') }}"
+  when: k8s_version_fallback_enabled | default(false)
 
 - name: "사용 가능한 패치 버전 확인"
   set_fact:
@@ -109,10 +122,30 @@
     - k8s_need_fallback | default(false)
     - k8s_target_minor_version in k8s_version_matrix
 
+- name: "패치 버전 확인 디버깅"
+  debug:
+    msg:
+      - "📋 패치 버전 확인 결과:"
+      - "  매트릭스에 버전 존재: {{ k8s_target_minor_version in k8s_version_matrix }}"
+      - "  사용 가능한 패치 버전: {{ k8s_available_patches | default([]) | join(', ') }}"
+      - "  패치 버전 개수: {{ k8s_available_patches | default([]) | length }}"
+  when: k8s_need_fallback | default(false)
+
 - name: "현재 요청된 패치 버전 확인"
   set_fact:
     k8s_requested_patch_version: "{{ k8s_target_version | regex_replace('^v', '') }}"
-  when: k8s_need_fallback | default(false)
+  when: 
+    - k8s_need_fallback | default(false)
+    - k8s_target_version is defined
+    - k8s_target_version != ""
+
+- name: "요청된 버전이 사용 가능한지 확인"
+  set_fact:
+    k8s_requested_version_available: "{{ k8s_requested_patch_version in k8s_available_patches }}"
+  when: 
+    - k8s_need_fallback | default(false)
+    - k8s_requested_patch_version is defined
+    - k8s_available_patches is defined
 
 - name: "Fallback 버전 선택"
   set_fact:
@@ -120,15 +153,19 @@
   when: 
     - k8s_need_fallback | default(false)
     - k8s_available_patches | length > 0
+    - k8s_requested_patch_version is defined
+    - not (k8s_requested_version_available | default(false))
 
 - name: "요청된 버전과 fallback 버전 비교"
   debug:
     msg:
-      - "버전 Fallback 정보:"
-      - "  요청된 버전: {{ k8s_requested_patch_version }}"
-      - "  사용 가능한 패치 버전: {{ k8s_available_patches | join(', ') }}"
-      - "  Fallback 전략: {{ k8s_version_fallback_strategy }}"
+      - "🔄 버전 Fallback 정보:"
+      - "  요청된 버전: {{ k8s_requested_patch_version | default('N/A') }}"
+      - "  요청된 버전 사용 가능: {{ k8s_requested_version_available | default('N/A') }}"
+      - "  사용 가능한 패치 버전: {{ k8s_available_patches | default([]) | join(', ') }}"
+      - "  Fallback 전략: {{ k8s_version_fallback_strategy | default('N/A') }}"
       - "  선택된 Fallback 버전: {{ k8s_fallback_version | default('N/A') }}"
+      - "  Fallback 필요: {{ not (k8s_requested_version_available | default(true)) }}"
   when: k8s_need_fallback | default(false)
 
 - name: "Fallback 버전 적용"
@@ -138,16 +175,31 @@
   when: 
     - k8s_need_fallback | default(false)
     - k8s_fallback_version is defined
-    - k8s_fallback_version != k8s_requested_patch_version
+    - k8s_fallback_version != ""
+    - k8s_requested_patch_version is defined
+    - not (k8s_requested_version_available | default(true))
 
 - name: "Fallback 적용 알림"
   debug:
     msg:
       - "⚠️  패키지 버전 Fallback이 적용되었습니다!"
-      - "  원래 요청 버전: {{ k8s_requested_patch_version }}"
-      - "  적용된 버전: {{ k8s_fallback_version }}"
-      - "  이유: 저장소에서 요청된 패치 버전을 사용할 수 없을 가능성이 높습니다."
+      - "  원래 요청 버전: {{ k8s_requested_patch_version | default('N/A') }}"
+      - "  적용된 버전: {{ k8s_fallback_version | default('N/A') }}"
+      - "  새로운 타겟 버전: {{ k8s_target_version | default('N/A') }}"
+      - "  이유: 요청된 버전이 사용 가능한 패치 버전 리스트에 없습니다."
   when: k8s_version_fallback_applied | default(false)
+
+- name: "Fallback 미적용 알림"
+  debug:
+    msg:
+      - "✅ 요청된 버전을 그대로 사용합니다."
+      - "  사용 버전: {{ k8s_target_version | default('N/A') }}"
+      - "  이유: 요청된 버전이 사용 가능한 패치 버전 리스트에 포함되어 있습니다."
+  when: 
+    - k8s_version_fallback_enabled | default(false)
+    - k8s_need_fallback | default(false)
+    - k8s_requested_version_available | default(true)
+    - not (k8s_version_fallback_applied | default(false))
 
 # 버전 비교 및 검증
 - name: "현재 버전과 목표 버전 비교"

@@ -110,8 +110,8 @@ k8s_version_matrix:
     crio_minor_version: "1.30"
     supported_crio_versions: ["1.30.1", "1.30.2", "1.30.3"]
     opensuse_available: true
-    # 1.30 이후 버전부터 fallback 지원
-    available_patch_versions: ["1.30.8", "1.30.7", "1.30.6", "1.30.5", "1.30.4", "1.30.3", "1.30.2", "1.30.1"]
+    # 1.30 이후 버전부터 fallback 지원 (실제 사용 가능한 최신 버전부터)
+    available_patch_versions: ["1.30.14", "1.30.13", "1.30.12", "1.30.11", "1.30.10", "1.30.9", "1.30.8", "1.30.7"]
   "1.31":
     crio_version: "1.31.2"
     crio_minor_version: "1.31"
