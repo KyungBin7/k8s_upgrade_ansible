@@ -64,14 +64,14 @@
     - k8s_prefer_package_install | default(false) | bool
     - ansible_os_family == "Debian"
 
-# 패키지 설치 시에만 기존 패키지 설치 상태 확인
+# 모든 시스템에서 기존 패키지 설치 상태 확인 (Binary 모드에서도 참고용으로 확인)
 - name: "기존 패키지 설치 여부 확인 (yum)"
   shell: "yum list installed | grep -E 'kubelet|kubeadm|kubectl'"
   register: yum_k8s_packages
   failed_when: false
   changed_when: false
   when: 
-    - k8s_detected_package_manager == "yum"
+    - ansible_os_family == "RedHat"
 
 - name: "기존 패키지 설치 여부 확인 (apt)"
   shell: "dpkg -l | grep -E 'kubelet|kubeadm|kubectl'"
@@ -79,10 +79,10 @@
   failed_when: false
   changed_when: false
   when: 
-    - k8s_detected_package_manager == "apt"
+    - ansible_os_family == "Debian"
 
 # 기존 패키지가 있는데 바이너리 모드라면 사용자에게 알림
-- name: "기존 패키지 설치 감지 알림"
+- name: "기존 패키지 설치 감지 알림 (RedHat 계열)"
   debug:
     msg: 
       - "기존 Kubernetes 패키지가 감지되었습니다."
@@ -90,8 +90,23 @@
       - "패키지 설치를 원한다면 k8s_prefer_package_install: true 로 설정하세요."
   when:
     - k8s_detected_package_manager == "binary"
-    - ((yum_k8s_packages is defined and yum_k8s_packages.stdout != "") or
-       (apt_k8s_packages is defined and apt_k8s_packages.stdout != ""))
+    - ansible_os_family == "RedHat"
+    - yum_k8s_packages is defined
+    - yum_k8s_packages.stdout is defined
+    - yum_k8s_packages.stdout != ""
+
+- name: "기존 패키지 설치 감지 알림 (Debian 계열)"
+  debug:
+    msg: 
+      - "기존 Kubernetes 패키지가 감지되었습니다."
+      - "현재 Binary 설치 모드이지만, 기존 패키지와 호환됩니다."
+      - "패키지 설치를 원한다면 k8s_prefer_package_install: true 로 설정하세요."
+  when:
+    - k8s_detected_package_manager == "binary"
+    - ansible_os_family == "Debian"
+    - apt_k8s_packages is defined
+    - apt_k8s_packages.stdout is defined
+    - apt_k8s_packages.stdout != ""
 
 # 수동 설정 적용
 - name: "수동 설정된 패키지 관리자 사용"
