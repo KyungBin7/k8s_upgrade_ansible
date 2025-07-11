@@ -11,7 +11,19 @@
   when: k8s_skip_upgrade
 
 # kubeadm 업그레이드
-- name: "kubeadm 업그레이드 (패키지 방식)"
+- name: "kubeadm 업그레이드 (패키지 방식 - 1.30 이후 fallback)"
+  include_tasks: 20_install_packages_with_fallback.yml
+  vars:
+    k8s_packages_to_install:
+      - "kubeadm={{ k8s_target_version | regex_replace('^v', '') }}-*"
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_detected_package_manager in ['yum', 'apt']
+    - k8s_enable_kubeadm
+    - k8s_version_fallback_enabled | default(false)
+    - k8s_target_minor_version is version(k8s_version_fallback_min_version | default('1.30'), '>=')
+
+- name: "kubeadm 업그레이드 (패키지 방식 - 기존 로직)"
   include_tasks: 20_install_packages.yml
   vars:
     k8s_packages_to_install:
@@ -20,6 +32,7 @@
     - not k8s_skip_upgrade
     - k8s_detected_package_manager in ['yum', 'apt']
     - k8s_enable_kubeadm
+    - not (k8s_version_fallback_enabled | default(false) and k8s_target_minor_version is version(k8s_version_fallback_min_version | default('1.30'), '>='))
 
 - name: "kubeadm 업그레이드 (바이너리 방식)"
   include_tasks: 21_install_binaries.yml
@@ -89,7 +102,19 @@
     - upgrade_worker_result is defined
 
 # kubelet 및 kubectl 업그레이드
-- name: "kubelet 및 kubectl 업그레이드 (패키지 방식)"
+- name: "kubelet 및 kubectl 업그레이드 (패키지 방식 - 1.30 이후 fallback)"
+  include_tasks: 20_install_packages_with_fallback.yml
+  vars:
+    k8s_packages_to_install:
+      - "kubelet={{ k8s_target_version | regex_replace('^v', '') }}-*"
+      - "kubectl={{ k8s_target_version | regex_replace('^v', '') }}-*"
+  when: 
+    - not k8s_skip_upgrade
+    - k8s_detected_package_manager in ['yum', 'apt']
+    - k8s_version_fallback_enabled | default(false)
+    - k8s_target_minor_version is version(k8s_version_fallback_min_version | default('1.30'), '>=')
+
+- name: "kubelet 및 kubectl 업그레이드 (패키지 방식 - 기존 로직)"
   include_tasks: 20_install_packages.yml
   vars:
     k8s_packages_to_install:
@@ -98,6 +123,7 @@
   when: 
     - not k8s_skip_upgrade
     - k8s_detected_package_manager in ['yum', 'apt']
+    - not (k8s_version_fallback_enabled | default(false) and k8s_target_minor_version is version(k8s_version_fallback_min_version | default('1.30'), '>='))
 
 - name: "kubelet 및 kubectl 업그레이드 (바이너리 방식)"
   include_tasks: 21_install_binaries.yml

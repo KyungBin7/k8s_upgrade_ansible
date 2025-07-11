@@ -118,9 +118,18 @@
   ignore_errors: true
 
 # kubeadm, kubelet, kubectl 업그레이드
-- name: "패키지 관리자를 통한 업그레이드"
+- name: "패키지 관리자를 통한 업그레이드 (1.30 이후 fallback)"
+  include_tasks: 20_install_packages_with_fallback.yml
+  when: 
+    - k8s_detected_package_manager != 'binary'
+    - k8s_version_fallback_enabled | default(false)
+    - k8s_target_minor_version is version(k8s_version_fallback_min_version | default('1.30'), '>=')
+
+- name: "패키지 관리자를 통한 업그레이드 (기존 로직)"
   include_tasks: 20_install_packages.yml
-  when: k8s_detected_package_manager != 'binary'
+  when: 
+    - k8s_detected_package_manager != 'binary'
+    - not (k8s_version_fallback_enabled | default(false) and k8s_target_minor_version is version(k8s_version_fallback_min_version | default('1.30'), '>='))
 
 - name: "바이너리를 통한 업그레이드"
   include_tasks: 21_install_binaries.yml
