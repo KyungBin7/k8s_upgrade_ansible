@@ -1,76 +1,97 @@
 ---
 # 패키지 관리자 감지 및 설정
+# 기본 우선순위: Binary 설치 → 패키지 설치 (안정성 우선)
 
-# Binary 설치 강제 설정 확인
-- name: "Binary 설치 강제 모드 확인"
+- name: "패키지 관리자 감지 시작"
+  debug:
+    msg: 
+      - "=== 패키지 관리자 감지 시작 ==="
+      - "우선순위: Binary 설치 → Package 설치"
+      - "안정성과 호환성을 위해 Binary 설치를 기본으로 사용합니다."
+
+# 수동 설정 확인
+- name: "수동 패키지 관리자 설정 확인"
+  debug:
+    msg: "수동으로 설정된 패키지 관리자: {{ k8s_package_manager }}"
+  when: k8s_package_manager != "auto"
+
+# Binary 설치 강제 설정 확인 (하위 호환성)
+- name: "Binary 설치 강제 모드 확인 (하위 호환성)"
   set_fact:
     k8s_detected_package_manager: "binary"
   when: k8s_force_binary_install | default(false) | bool
 
-- name: "Binary 설치 강제 모드 알림"
+- name: "Binary 설치 강제 모드 알림 (하위 호환성)"
   debug:
-    msg: "k8s_force_binary_install 설정으로 인해 Binary 설치 모드가 강제 적용되었습니다."
+    msg: "k8s_force_binary_install 설정으로 인해 Binary 설치 모드가 적용되었습니다."
   when: k8s_force_binary_install | default(false) | bool
 
-- name: "수동 패키지 관리자 설정 확인"
-  debug:
-    msg: "수동으로 설정된 패키지 관리자: {{ k8s_package_manager }}"
+# 기본값: Binary 설치 우선 (안정성과 호환성)
+- name: "기본 패키지 관리자 설정 (Binary 우선)"
+  set_fact:
+    k8s_detected_package_manager: "binary"
   when: 
-    - k8s_package_manager != "auto"
-    - not (k8s_force_binary_install | default(false) | bool)
+    - k8s_package_manager == "auto"
+    - k8s_detected_package_manager is not defined
 
-# OS별 패키지 관리자 자동 감지
-- name: "Red Hat 계열 패키지 관리자 감지"
+# 패키지 설치 강제 요청 시에만 OS별 패키지 관리자 감지
+- name: "Red Hat 계열 패키지 관리자 감지 (패키지 설치 요청 시)"
   set_fact:
     k8s_detected_package_manager: "yum"
   when:
-    - k8s_package_manager == "auto"
+    - k8s_package_manager in ["yum", "package"]
     - ansible_os_family == "RedHat"
-    - not (k8s_force_binary_install | default(false) | bool)
 
-- name: "Debian 계열 패키지 관리자 감지"
+- name: "Debian 계열 패키지 관리자 감지 (패키지 설치 요청 시)"
   set_fact:
     k8s_detected_package_manager: "apt"
   when:
-    - k8s_package_manager == "auto"
+    - k8s_package_manager in ["apt", "package"]
     - ansible_os_family == "Debian"
-    - not (k8s_force_binary_install | default(false) | bool)
 
-# 바이너리 설치 여부 확인
-- name: "패키지 매니저 설치 여부 확인 (yum)"
+# Legacy 호환성: 사용자가 명시적으로 OS별 패키지 관리자를 원할 때
+- name: "사용자 요청 시 Red Hat 계열 패키지 관리자 적용"
+  set_fact:
+    k8s_detected_package_manager: "yum"
+  when:
+    - k8s_prefer_package_install | default(false) | bool
+    - ansible_os_family == "RedHat"
+
+- name: "사용자 요청 시 Debian 계열 패키지 관리자 적용"
+  set_fact:
+    k8s_detected_package_manager: "apt"
+  when:
+    - k8s_prefer_package_install | default(false) | bool
+    - ansible_os_family == "Debian"
+
+# 패키지 설치 시에만 기존 패키지 설치 상태 확인
+- name: "기존 패키지 설치 여부 확인 (yum)"
   shell: "yum list installed | grep -E 'kubelet|kubeadm|kubectl'"
   register: yum_k8s_packages
   failed_when: false
   changed_when: false
   when: 
     - k8s_detected_package_manager == "yum"
-    - k8s_package_manager == "auto"
 
-- name: "패키지 매니저 설치 여부 확인 (apt)"
+- name: "기존 패키지 설치 여부 확인 (apt)"
   shell: "dpkg -l | grep -E 'kubelet|kubeadm|kubectl'"
   register: apt_k8s_packages
   failed_when: false
   changed_when: false
   when: 
     - k8s_detected_package_manager == "apt"
-    - k8s_package_manager == "auto"
 
-# 바이너리 설치로 변경
-- name: "바이너리 설치 모드로 변경 (yum - 패키지 없음)"
-  set_fact:
-    k8s_detected_package_manager: "binary"
+# 기존 패키지가 있는데 바이너리 모드라면 사용자에게 알림
+- name: "기존 패키지 설치 감지 알림"
+  debug:
+    msg: 
+      - "기존 Kubernetes 패키지가 감지되었습니다."
+      - "현재 Binary 설치 모드이지만, 기존 패키지와 호환됩니다."
+      - "패키지 설치를 원한다면 k8s_prefer_package_install: true 로 설정하세요."
   when:
-    - k8s_detected_package_manager == "yum"
-    - k8s_package_manager == "auto"
-    - yum_k8s_packages.stdout == ""
-
-- name: "바이너리 설치 모드로 변경 (apt - 패키지 없음)"
-  set_fact:
-    k8s_detected_package_manager: "binary"
-  when:
-    - k8s_detected_package_manager == "apt"
-    - k8s_package_manager == "auto"
-    - apt_k8s_packages.stdout == ""
+    - k8s_detected_package_manager == "binary"
+    - ((yum_k8s_packages is defined and yum_k8s_packages.stdout != "") or
+       (apt_k8s_packages is defined and apt_k8s_packages.stdout != ""))
 
 # 수동 설정 적용
 - name: "수동 설정된 패키지 관리자 사용"

@@ -25,9 +25,11 @@ k8s_systemd_dir: "/etc/systemd/system"
 k8s_kubeadm_config_file: "{{ k8s_config_dir }}/kubeadm-config.yaml"
 k8s_enable_kubeadm: true
 
-# 패키지 관리자 설정 (패키지 설치된 경우)
-k8s_package_manager: "auto"  # auto, yum, apt, binary
+# 패키지 관리자 설정 (안정성을 위해 Binary 설치 기본 사용)
+k8s_package_manager: "auto"  # auto(=binary 우선), yum, apt, binary, package
 k8s_package_hold: true  # 패키지 버전 고정
+k8s_prefer_package_install: false  # true로 설정하면 패키지 설치 우선 사용
+k8s_force_binary_install: false  # 하위 호환성을 위한 옵션 (deprecated)
 
 # 검증 설정
 k8s_verify_upgrade: true

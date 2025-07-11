@@ -12,9 +12,8 @@
   vars:
     # 기본 설정 - 자동 버전 업그레이드
     k8s_current_version: ""  # 자동 감지
-    k8s_target_version: "v1.30.8"   # 1.30.14 대신 1.30.8 사용 (확실히 존재하는 버전)
+    k8s_target_version: ""   # 자동 감지로 복원
     k8s_force_version: false
-    k8s_force_binary_install: true  # 패키지 설치 문제 회피를 위해 binary 설치 강제 사용
     k8s_upgrade_phase: "control_plane"
     
     # 업그레이드 전략
@@ -121,9 +120,8 @@
   vars:
     # 기본 설정 - 마스터와 동일한 버전으로
     k8s_current_version: ""  # 자동 감지
-    k8s_target_version: "v1.30.8"   # 마스터와 동일한 버전으로 설정
+    k8s_target_version: ""   # 마스터와 동일한 버전으로 자동 설정
     k8s_force_version: false
-    k8s_force_binary_install: true  # 패키지 설치 문제 회피를 위해 binary 설치 강제 사용
     k8s_upgrade_phase: "worker"
     
     # 업그레이드 전략 - 워커는 더 신중하게
