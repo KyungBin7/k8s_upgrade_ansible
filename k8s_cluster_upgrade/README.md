@@ -16,22 +16,9 @@
 
 ## 지원 버전
 
-- **Kubernetes**: 1.23 - 1.33
-- **OS**: Rocky 8/9, CentOS 8/9, Ubuntu 18.04/20.04/22.04/24.04
+- **Kubernetes**: 1.23 - 1.28
+- **OS**: Rocky 8/9, CentOS 8/9, Ubuntu 18.04/20.04/22.04
 - **Ansible**: 2.9+
-
-## 새로운 Kubernetes 패키지 저장소 지원
-
-이 Role은 2024년 3월부터 적용된 새로운 Kubernetes 패키지 저장소 구조를 지원합니다:
-
-- **새로운 공식 저장소**: `pkgs.k8s.io` (커뮤니티 소유)
-- **버전별 저장소**: 각 Kubernetes 마이너 버전마다 별도의 저장소
-- **자동 저장소 선택**: 버전에 따라 최적의 저장소 자동 선택
-- **호환성 보장**: 1.24 이상 버전에서 새로운 저장소 자동 사용
-
-### 저장소 전환 내역
-- **1.24+**: 새로운 `pkgs.k8s.io` 저장소 사용
-- **1.23 이하**: 바이너리 설치로 자동 전환 (레거시 저장소 지원 중단됨)
 
 ## 요구사항
 
@@ -216,4 +203,61 @@ k8s_upgrade_skip_drain: true
 ```
 
 #### 3. 타임아웃 발생
+```yaml
+# 타임아웃 늘리기
+k8s_upgrade_timeout: 1200
+k8s_upgrade_drain_timeout: 600
 ```
+
+#### 4. 백업 공간 부족
+```yaml
+# 백업 비활성화 (권장하지 않음)
+k8s_backup_enabled: false
+```
+
+### 로그 확인
+
+```bash
+# 업그레이드 로그 확인
+tail -f /var/log/k8s-upgrade.log
+
+# 서비스 상태 확인
+systemctl status kubelet
+journalctl -u kubelet -f
+```
+
+### 수동 복구
+
+업그레이드가 실패한 경우:
+
+1. **백업에서 복구**
+```bash
+# etcd 복구
+sudo systemctl stop etcd
+sudo rm -rf /var/lib/etcd/*
+sudo etcdctl snapshot restore /opt/k8s-backup/etcd-snapshot.db --data-dir=/var/lib/etcd
+sudo systemctl start etcd
+```
+
+2. **설정 파일 복구**
+```bash
+sudo cp -r /opt/k8s-backup/kubernetes/* /etc/kubernetes/
+```
+
+## 개발자 정보
+
+- **작성자**: MetaNet DevOps Team
+- **라이센스**: MIT
+- **저장소**: https://github.com/metanet/k8s-cluster-upgrade-ansible
+
+## 기여
+
+1. Fork the repository
+2. Create your feature branch (`git checkout -b feature/amazing-feature`)
+3. Commit your changes (`git commit -m 'Add some amazing feature'`)
+4. Push to the branch (`git push origin feature/amazing-feature`)
+5. Open a Pull Request
+
+## 라이센스
+
+이 프로젝트는 MIT 라이센스 하에 배포됩니다. 자세한 내용은 `LICENSE` 파일을 참조하세요. 
