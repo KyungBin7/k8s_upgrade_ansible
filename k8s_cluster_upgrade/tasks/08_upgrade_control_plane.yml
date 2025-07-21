@@ -31,7 +31,7 @@
 
 # kubeadm 업그레이드 계획 확인
 - name: "kubeadm 업그레이드 계획 확인"
-  command: kubeadm upgrade plan
+  command: kubeadm upgrade plan --ignore-preflight-errors=CreateJob
   register: upgrade_plan_output
   when: not k8s_skip_upgrade
 
