@@ -44,7 +44,7 @@
 
 # 업그레이드 적용
 - name: "kubeadm 업그레이드 적용"
-  command: "kubeadm upgrade apply {{ k8s_target_version }} --yes"
+  command: "kubeadm upgrade apply {{ k8s_target_version }} --yes --ignore-preflight-errors=CreateJob"
   register: upgrade_apply_result
   when: not k8s_skip_upgrade
   async: "{{ k8s_upgrade_timeout }}"
