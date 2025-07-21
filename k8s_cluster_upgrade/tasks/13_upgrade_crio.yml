@@ -390,6 +390,14 @@
   ignore_errors: true
 
 # CRI-O 1.30+ conmon 경로 확인 및 수정
+- name: "CRI-O 설정 파일 존재 확인"
+  stat:
+    path: /etc/crio/crio.conf
+  register: crio_conf_exists
+  when: 
+    - crio_needs_upgrade
+    - crio_minor_version is defined
+
 - name: "CRI-O 1.30+ conmon 경로 확인"
   shell: |
     if [ "{{ crio_minor_version | default('0.0') }}" = "1.30" ]; then
@@ -401,6 +409,7 @@
   when: 
     - crio_needs_upgrade
     - crio_minor_version is defined
+    - crio_conf_exists.stat.exists | default(false)
   changed_when: false
 
 - name: "CRI-O 1.30+ conmon 경로 수정"
@@ -412,9 +421,22 @@
     - crio_needs_upgrade
     - crio_minor_version is defined
     - crio_minor_version == "1.30"
+    - crio_conf_exists.stat.exists | default(false)
     - conmon_path_check is defined
     - conmon_path_check.stdout is defined
     - '"/usr/libexec/crio/conmon" in conmon_path_check.stdout'
+  notify:
+    - restart crio
+    - restart kubelet
+
+- name: "CRI-O 설정 파일 없음 - 재시작만 수행"
+  debug:
+    msg: "/etc/crio/crio.conf 파일이 존재하지 않아 conmon 경로 수정을 건너뛰고 CRI-O 재시작만 수행합니다."
+  when: 
+    - crio_needs_upgrade
+    - crio_minor_version is defined
+    - crio_minor_version == "1.30"
+    - not (crio_conf_exists.stat.exists | default(false))
   notify:
     - restart crio
     - restart kubelet
