@@ -399,16 +399,12 @@
     - crio_minor_version is defined
 
 - name: "CRI-O 1.30+ conmon 경로 확인"
-  shell: |
-    if [ "{{ crio_minor_version | default('0.0') }}" = "1.30" ]; then
-      find /usr -name conmon 2>/dev/null
-    else
-      echo "skip"
-    fi
+  shell: find /usr -name conmon 2>/dev/null
   register: conmon_path_check
   when: 
     - crio_needs_upgrade
     - crio_minor_version is defined
+    - crio_minor_version is version('1.30', '>=')
     - crio_conf_exists.stat.exists | default(false)
   changed_when: false
 
@@ -420,7 +416,7 @@
   when: 
     - crio_needs_upgrade
     - crio_minor_version is defined
-    - crio_minor_version == "1.30"
+    - crio_minor_version is version('1.30', '>=')
     - crio_conf_exists.stat.exists | default(false)
     - conmon_path_check is defined
     - conmon_path_check.stdout is defined
@@ -435,7 +431,7 @@
   when: 
     - crio_needs_upgrade
     - crio_minor_version is defined
-    - crio_minor_version == "1.30"
+    - crio_minor_version is version('1.30', '>=')
     - not (crio_conf_exists.stat.exists | default(false))
   notify:
     - restart crio
