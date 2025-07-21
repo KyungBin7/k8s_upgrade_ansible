@@ -389,6 +389,36 @@
   when: crio_needs_upgrade
   ignore_errors: true
 
+# CRI-O 1.30+ conmon 경로 확인 및 수정
+- name: "CRI-O 1.30+ conmon 경로 확인"
+  shell: |
+    if [ "{{ crio_minor_version | default('0.0') }}" = "1.30" ]; then
+      find /usr -name conmon 2>/dev/null
+    else
+      echo "skip"
+    fi
+  register: conmon_path_check
+  when: 
+    - crio_needs_upgrade
+    - crio_minor_version is defined
+  changed_when: false
+
+- name: "CRI-O 1.30+ conmon 경로 수정"
+  replace:
+    path: /etc/crio/crio.conf
+    regexp: 'conmon = "/usr/bin/conmon"'
+    replace: 'conmon = "/usr/libexec/crio/conmon"'
+  when: 
+    - crio_needs_upgrade
+    - crio_minor_version is defined
+    - crio_minor_version == "1.30"
+    - conmon_path_check is defined
+    - conmon_path_check.stdout is defined
+    - '"/usr/libexec/crio/conmon" in conmon_path_check.stdout'
+  notify:
+    - restart crio
+    - restart kubelet
+
 - name: "CRI-O 구성 파일 업데이트"
   template:
     src: crio.conf.j2
