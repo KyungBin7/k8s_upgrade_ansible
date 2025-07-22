@@ -64,7 +64,11 @@ default_ulimits = [
 no_pivot = false
 
 # Path to the conmon binary, used for monitoring the OCI runtime.
+{% if crio_minor_version is defined and crio_minor_version is version('1.30', '>=') %}
+conmon = "/usr/libexec/crio/conmon"
+{% else %}
 conmon = "/usr/bin/conmon"
+{% endif %}
 
 # Cgroup setting for conmon
 conmon_cgroup = "pod"
