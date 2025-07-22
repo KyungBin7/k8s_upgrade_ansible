@@ -456,13 +456,28 @@
   register: crio_socket_status
   when: crio_needs_upgrade
 
-- name: "CRI-O 업그레이드 성공 여부 확인"
-  set_fact:
-    crio_upgrade_success: "{{ crio_upgraded_version.stdout is version(crio_minor_version, '>=') and crio_upgraded_version.stdout is version(crio_minor_version + '.999', '<') }}"
+- name: "CRI-O 버전 정보 디버깅"
+  debug:
+    msg:
+      - "현재 설치된 CRI-O 버전: {{ crio_upgraded_version.stdout | default('확인 불가') }}"
+      - "목표 마이너 버전: {{ crio_minor_version | default('확인 불가') }}"
+      - "목표 버전 (참고): {{ crio_target_version | default('확인 불가') }}"
+      - "추출된 마이너 버전: {{ crio_upgraded_version.stdout | default('') | regex_replace('^([0-9]+\\.[0-9]+)\\..*', '\\1') if crio_upgraded_version.stdout | default('') != '' else '추출 실패' }}"
   when: 
     - crio_needs_upgrade
     - crio_upgraded_version is defined
-    - crio_minor_version is defined
+
+- name: "CRI-O 업그레이드 성공 여부 확인"
+  set_fact:
+    crio_upgrade_success: >-
+      {{
+        (crio_upgraded_version.stdout | default('') != '') and
+        (crio_minor_version | default('') != '') and
+        (crio_upgraded_version.stdout | regex_replace('^([0-9]+\.[0-9]+)\..*', '\1') == crio_minor_version)
+      }}
+  when: 
+    - crio_needs_upgrade
+    - crio_upgraded_version is defined
 
 - name: "CRI-O 업그레이드 실패 시 중단"
   fail:
@@ -476,6 +491,8 @@
   when: 
     - crio_needs_upgrade
     - crio_upgraded_version is defined
+    - crio_minor_version is defined
+    - crio_minor_version != ''
     - not (crio_upgrade_success | default(false))
 
 # kubelet과 CRI-O 연결 테스트
