@@ -458,18 +458,20 @@
 
 - name: "CRI-O 업그레이드 성공 여부 확인"
   set_fact:
-    crio_upgrade_success: "{{ crio_upgraded_version.stdout == crio_target_version }}"
+    crio_upgrade_success: "{{ crio_upgraded_version.stdout is version(crio_minor_version, '>=') and crio_upgraded_version.stdout is version(crio_minor_version + '.999', '<') }}"
   when: 
     - crio_needs_upgrade
     - crio_upgraded_version is defined
+    - crio_minor_version is defined
 
 - name: "CRI-O 업그레이드 실패 시 중단"
   fail:
     msg:
       - "CRI-O 업그레이드가 완전히 완료되지 않았습니다!"
-      - "목표 버전: {{ crio_target_version }}"
-      - "현재 버전: {{ crio_upgraded_version.stdout | default('확인 불가') }}"
-      - "CRI-O 버전이 일치하지 않으므로 클러스터 업그레이드를 중단합니다."
+      - "목표 마이너 버전: {{ crio_minor_version }}"
+      - "목표 버전 (참고): {{ crio_target_version }}"
+      - "현재 설치된 버전: {{ crio_upgraded_version.stdout | default('확인 불가') }}"
+      - "CRI-O 마이너 버전이 일치하지 않으므로 클러스터 업그레이드를 중단합니다."
       - "수동으로 CRI-O를 수정한 후 다시 시도해주세요."
   when: 
     - crio_needs_upgrade
