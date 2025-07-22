@@ -429,12 +429,42 @@
     - crio_restart_result is defined
 
 # 업그레이드 후 검증
+- name: "업그레이드된 CRI-O 버전 확인 (디버깅)"
+  shell: |
+    echo "=== CRI-O 버전 확인 디버깅 ==="
+    if command -v crio >/dev/null 2>&1; then
+      echo "crio 명령어 존재함"
+      version_output=$(crio version 2>&1)
+      echo "crio version 출력: $version_output"
+      
+      # 여러 방법으로 버전 추출 시도
+      version1=$(echo "$version_output" | grep -E "(crio version|RuntimeVersion|Starting CRI-O, version)" | head -1 | sed -E 's/.*version:? ([0-9]+\.[0-9]+\.[0-9]+).*/\1/' | sed 's/^v//')
+      echo "방법1 결과: $version1"
+      
+      version2=$(echo "$version_output" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1)
+      echo "방법2 결과: $version2"
+      
+      # 첫 번째 방법이 실패하면 두 번째 방법 사용
+      if [ -n "$version1" ]; then
+        echo "$version1"
+      elif [ -n "$version2" ]; then
+        echo "$version2"
+      else
+        echo "version_not_found"
+      fi
+    else
+      echo "not_installed"
+    fi
+  register: crio_version_debug
+  when: crio_needs_upgrade
+  changed_when: false
+
 - name: "업그레이드된 CRI-O 버전 확인"
   shell: |
     if command -v crio >/dev/null 2>&1; then
-      # crio version 명령어에서 버전 추출 (stdout 또는 stderr 모두 확인)
+      # crio version 명령어에서 버전 추출 (더 간단한 방법)
       version_output=$(crio version 2>&1)
-      echo "$version_output" | grep -E "(crio version|RuntimeVersion|Starting CRI-O, version)" | head -1 | sed -E 's/.*version:? ([0-9]+\.[0-9]+\.[0-9]+).*/\1/' | sed 's/^v//'
+      echo "$version_output" | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' | head -1
     else
       echo "not_installed"
     fi
@@ -456,13 +486,23 @@
   register: crio_socket_status
   when: crio_needs_upgrade
 
+- name: "CRI-O 버전 디버깅 정보 출력"
+  debug:
+    msg:
+      - "=== 디버깅 출력 ==="
+      - "{{ crio_version_debug.stdout_lines | default(['디버깅 정보 없음']) }}"
+  when: 
+    - crio_needs_upgrade
+    - crio_version_debug is defined
+
 - name: "CRI-O 버전 정보 디버깅"
   debug:
     msg:
-      - "현재 설치된 CRI-O 버전: {{ crio_upgraded_version.stdout | default('확인 불가') }}"
-      - "목표 마이너 버전: {{ crio_minor_version | default('확인 불가') }}"
-      - "목표 버전 (참고): {{ crio_target_version | default('확인 불가') }}"
-      - "추출된 마이너 버전: {{ crio_upgraded_version.stdout | default('') | regex_replace('^([0-9]+\\.[0-9]+)\\..*', '\\1') if crio_upgraded_version.stdout | default('') != '' else '추출 실패' }}"
+      - "현재 설치된 CRI-O 버전: '{{ crio_upgraded_version.stdout | default('확인 불가') }}'"
+      - "목표 마이너 버전: '{{ crio_minor_version | default('확인 불가') }}'"
+      - "목표 버전 (참고): '{{ crio_target_version | default('확인 불가') }}'"
+      - "추출된 마이너 버전: '{{ crio_upgraded_version.stdout | default('') | regex_replace('^([0-9]+\\.[0-9]+)\\..*', '\\1') if crio_upgraded_version.stdout | default('') != '' else '추출 실패' }}'"
+      - "버전이 비어있나?: {{ (crio_upgraded_version.stdout | default('') == '') }}"
   when: 
     - crio_needs_upgrade
     - crio_upgraded_version is defined
